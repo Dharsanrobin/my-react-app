@@ -23,7 +23,7 @@ export default function Members() {
 
   // Check where the component is accessed from
   const isFromHome = location.state?.from === "home";
-  const isFromLogin = location.state?.from === "login" || !isFromHome; // Default to login mode if no state
+  // const isFromLogin = location.state?.from === "login" || !isFromHome; // Default to login mode if no state
 
   const [formData, setFormData] = useState<FormData>(emptyForm);
   const [users, setUsers] = useState<FormData[]>([]);

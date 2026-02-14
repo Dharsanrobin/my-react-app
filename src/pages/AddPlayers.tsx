@@ -129,7 +129,7 @@ export default function AddPlayers() {
 
   // Check where the component is accessed from
   const isFromHome = location.state?.from === "home";
-  const isFromLogin = location.state?.from === "login" || !isFromHome; // Default to login mode if no state
+  // const isFromLogin = location.state?.from === "login" || !isFromHome; // Default to login mode if no state
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
 
