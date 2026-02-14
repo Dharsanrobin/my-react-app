@@ -19,7 +19,7 @@ export default function Login() {
           onClick={() => navigate(-1)}
           className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-200"
         >
-          ← Back
+          ← Bac
         </button>
 
         <div className="mb-8 mt-6 flex flex-col gap-3">
