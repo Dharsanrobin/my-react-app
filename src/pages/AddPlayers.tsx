@@ -18,14 +18,6 @@ type ApiPlayer = {
   imageUrl: string;
 };
 
-// API request type for creating a player
-type CreatePlayerRequest = {
-  name: string;
-  position: string;
-  basePrice: number;
-  imageUrl: string | null;
-};
-
 const emptyPlayer: PlayerData = {
   id: "",
   playerName: "",
@@ -134,7 +126,6 @@ export default function AddPlayers() {
   // API states
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Check where the component is accessed from
   const isFromHome = location.state?.from === "home";
@@ -193,56 +184,6 @@ export default function AddPlayers() {
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  /* ===================== POST API ===================== */
-  const createPlayer = async (playerData: PlayerData): Promise<ApiPlayer | null> => {
-    try {
-      setIsSubmitting(true);
-      setApiError(null);
-
-      // Convert base64 image to File object if it exists
-      let imageUrl = null;
-      if (playerData.playerImage) {
-        // If it's a base64 string, we need to upload it first
-        // For now, we'll send the base64 string directly
-        // In a production app, you might want to upload the image to a storage service first
-        imageUrl = playerData.playerImage;
-      }
-
-      const requestData: CreatePlayerRequest = {
-        name: playerData.playerName,
-        position: playerData.playerPosition,
-        basePrice: 1000, // Default base price since it's required by API
-        imageUrl: imageUrl,
-      };
-
-      const res = await fetch(
-        "https://just-encouragement-production-671d.up.railway.app/project/api/players",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestData),
-        }
-      );
-
-      if (!res.ok) {
-        const errorData = await res.text();
-        throw new Error(`Failed to create player: ${res.status} - ${errorData}`);
-      }
-
-      const createdPlayer: ApiPlayer = await res.json();
-      return createdPlayer;
-
-    } catch (err: any) {
-      setApiError(err?.message || "Failed to create player");
-      console.error("Error creating player:", err);
-      return null;
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -329,7 +270,7 @@ export default function AddPlayers() {
     if (editingId === id) cancelEdit();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (
@@ -343,7 +284,6 @@ export default function AddPlayers() {
     }
 
     if (isEditing) {
-      // For editing, we'll update locally only since API might not support PUT
       setPlayers((prev) =>
         prev.map((p) => (p.id === editingId ? { ...formData } : p))
       );
@@ -351,37 +291,16 @@ export default function AddPlayers() {
       return;
     }
 
-    // Check if ID already exists locally
     const exists = players.some((p) => p.id === formData.id);
     if (exists) {
       alert("This ID already exists. Use another ID.");
       return;
     }
 
-    // Create player in backend
-    const createdPlayer = await createPlayer(formData);
-    
-    if (createdPlayer) {
-      // Add the created player to the local state with the new ID from backend
-      const newPlayer: PlayerData = {
-        ...formData,
-        id: String(createdPlayer.id), // Use the ID from backend
-      };
-      
-      setPlayers((prev) => [...prev, newPlayer]);
-      setFormData(emptyPlayer);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-      
-    
-    } else {
-      // If API fails, add to local state as fallback
-      setPlayers((prev) => [...prev, formData]);
-      setFormData(emptyPlayer);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+    setPlayers((prev) => [...prev, formData]);
+    setFormData(emptyPlayer);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
@@ -439,16 +358,16 @@ export default function AddPlayers() {
               {/* Refresh Button */}
               <button
                 onClick={fetchPlayers}
-                disabled={loading || isSubmitting}
+                disabled={loading}
                 className={[
                   "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shadow-sm ring-1",
-                  (loading || isSubmitting)
+                  loading
                     ? "cursor-not-allowed bg-slate-100 text-slate-400 ring-slate-200"
                     : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-100",
                   "focus:outline-none focus:ring-4 focus:ring-slate-200",
                 ].join(" ")}
               >
-                {(loading || isSubmitting) ? (
+                {loading ? (
                   <>
                     <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -502,11 +421,11 @@ export default function AddPlayers() {
                       value={formData.id}
                       onChange={handleChange}
                       placeholder="Enter ID"
-                      disabled={isEditing || isSubmitting}
+                      disabled={isEditing}
                       className={[
                         "w-24 rounded-xl border px-3 py-2 text-slate-900 shadow-sm outline-none",
                         "border-slate-200 focus:border-slate-400 focus:ring-4 focus:ring-slate-100",
-                        (isEditing || isSubmitting) ? "cursor-not-allowed bg-slate-100" : "bg-white",
+                        isEditing ? "cursor-not-allowed bg-slate-100" : "bg-white",
                       ].join(" ")}
                     />
                   </div>
@@ -520,8 +439,7 @@ export default function AddPlayers() {
                       value={formData.playerName}
                       onChange={handleChange}
                       placeholder="Enter player name"
-                      disabled={isSubmitting}
-                      className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                     />
                   </div>
 
@@ -534,8 +452,7 @@ export default function AddPlayers() {
                       value={formData.playerPosition}
                       onChange={handleChange}
                       placeholder="e.g., Striker, Midfielder"
-                      disabled={isSubmitting}
-                      className="w-48 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      className="w-48 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                     />
                   </div>
 
@@ -548,8 +465,7 @@ export default function AddPlayers() {
                       value={formData.playerCountry}
                       onChange={handleChange}
                       placeholder="e.g., Brazil, India"
-                      disabled={isSubmitting}
-                      className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                     />
                   </div>
 
@@ -563,7 +479,6 @@ export default function AddPlayers() {
                           ref={fileInputRef}
                           accept="image/*"
                           onChange={handleImageUpload}
-                          disabled={isSubmitting}
                           className="hidden"
                           id="playerImage"
                         />
@@ -572,7 +487,7 @@ export default function AddPlayers() {
                           className={[
                             "flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 shadow-sm transition-colors",
                             "border-slate-200 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100",
-                            (isUploading || isSubmitting) ? "bg-slate-100 cursor-wait" : "bg-white",
+                            isUploading ? "bg-slate-100 cursor-wait" : "bg-white",
                           ].join(" ")}
                         >
                           {isUploading ? (
@@ -619,8 +534,7 @@ export default function AddPlayers() {
                           <button
                             type="button"
                             onClick={removeImage}
-                            disabled={isSubmitting}
-                            className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center h-5 w-5 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 shadow-sm disabled:hidden"
+                            className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center h-5 w-5 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 shadow-sm"
                           >
                             ×
                           </button>
@@ -633,24 +547,24 @@ export default function AddPlayers() {
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={loading || isUploading || isSubmitting}
+                      disabled={loading}
                       className={[
                         "rounded-xl px-5 py-2 text-sm font-semibold text-white shadow-sm",
                         isEditing
                           ? "bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-100"
                           : "bg-blue-600 hover:bg-blue-700 focus:ring-blue-100",
                         "focus:outline-none focus:ring-4",
-                        (loading || isUploading || isSubmitting) && "opacity-50 cursor-not-allowed",
+                        loading && "opacity-50 cursor-not-allowed",
                       ].join(" ")}
                     >
-                      {isSubmitting ? "Creating..." : (isEditing ? "Update Player" : "Add Player")}
+                      {loading ? "Processing..." : (isEditing ? "Update Player" : "Add Player")}
                     </button>
 
                     {isEditing && (
                       <button
                         type="button"
                         onClick={cancelEdit}
-                        disabled={loading || isSubmitting}
+                        disabled={loading}
                         className="rounded-xl border border-slate-200 bg-white px-5 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Cancel
@@ -680,7 +594,7 @@ export default function AddPlayers() {
               </div>
             </div>
 
-            {(loading || isSubmitting) && players.length === 0 ? (
+            {loading && players.length === 0 ? (
               <div className="mt-6 rounded-xl border border-dashed border-slate-200 p-8 text-center">
                 <div className="flex flex-col items-center gap-3">
                   <svg className="animate-spin h-8 w-8 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -795,7 +709,7 @@ export default function AddPlayers() {
                                 <button
                                   type="button"
                                   onClick={() => startEdit(p)}
-                                  disabled={loading || isSubmitting}
+                                  disabled={loading}
                                   className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   Edit
@@ -803,7 +717,7 @@ export default function AddPlayers() {
                                 <button
                                   type="button"
                                   onClick={() => deletePlayer(p.id)}
-                                  disabled={loading || isSubmitting}
+                                  disabled={loading}
                                   className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-4 focus:ring-rose-100 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   Delete
@@ -824,3 +738,5 @@ export default function AddPlayers() {
     </>
   );
 }
+
+
