@@ -1,26 +1,33 @@
-import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import { Routes, Route } from "react-router-dom";
+import Home from "./pages/Home";
+import Login from "./pages/Login";
+import CreateAuction from "./pages/CreateAuction";
+import AuctionsDetails from "./pages/AuctionsDetails";
+import Members from "./pages/Members";
+import CreateTour from "./pages/CreateTour";
+import AddPlayers from "./pages/AddPlayers";
 
-function App() {
+import AuthLogin from "./pages/AuthLogin";
+import ProtectedRoute from "./components/ProtectedRoute";
+
+export default function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <Routes>
+      {/* Public login page */}
+      <Route path="/auth" element={<AuthLogin />} />
+
+      {/* Dashboard pages protected */}
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/CreateAuction" element={<CreateAuction />} />
+        <Route path="/AuctionsDetails" element={<AuctionsDetails />} />
+        <Route path="/Members" element={<Members />} />
+        <Route path="/CreateTour" element={<CreateTour />} />
+        <Route path="/AddPlayers" element={<AddPlayers />} />
+
+        {/* old login inside dashboard */}
+        <Route path="/login" element={<Login />} />
+      </Route>
+    </Routes>
   );
 }
-
-export default App;
