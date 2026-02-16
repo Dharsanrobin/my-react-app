@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import BackButton from "../components/BackButton";
 
 interface PlayerData {
   id: string;
@@ -109,6 +110,223 @@ const ImageModal: React.FC<{
   );
 };
 
+// Image Upload Modal Component
+const ImageUploadModal: React.FC<{
+  playerId: string;
+  playerName: string;
+  onClose: () => void;
+  onUploadSuccess: (imageUrl: string) => void;
+}> = ({ playerId, playerName, onClose, onUploadSuccess }) => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      setUploadError("Please upload a valid image file (JPEG, PNG, GIF, WebP)");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("Image size should be less than 5MB");
+      return;
+    }
+
+    setUploadError(null);
+    setSelectedFile(file);
+
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPreviewUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUpload = async () => {
+  if (!selectedFile) {
+    setUploadError("Please select an image first");
+    return;
+  }
+
+  try {
+    setIsUploading(true);
+    setUploadError(null);
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    console.log("Uploading for player ID:", playerId);
+    console.log("File name:", selectedFile.name);
+
+    const res = await fetch(
+      `https://just-encouragement-production-671d.up.railway.app/project/api/players/image/${playerId}`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    console.log("Response status:", res.status);
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Upload failed: ${res.status} - ${errorText}`);
+    }
+
+    // Check content type to determine response format
+    const contentType = res.headers.get("content-type");
+    
+    if (contentType && contentType.includes("application/json")) {
+      // If JSON, parse it
+      const data = await res.json();
+      onUploadSuccess(data.imageUrl || data.url || data.fileUrl);
+    } else {
+      // If not JSON (like image binary), create a blob URL
+      const blob = await res.blob();
+      const imageUrl = URL.createObjectURL(blob);
+      onUploadSuccess(imageUrl);
+    }
+    
+    onClose();
+  } catch (err: any) {
+    setUploadError(err?.message || "Failed to upload image");
+    console.error("Error uploading image:", err);
+  } finally {
+    setIsUploading(false);
+  }
+};
+
+  // Handle Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div 
+        className="relative w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-slate-900">
+            Upload Image for {playerName}
+          </h3>
+          <button
+            onClick={onClose}
+            className="rounded-full p-1 hover:bg-slate-100"
+          >
+            <svg className="h-5 w-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Image Preview */}
+        {previewUrl && (
+          <div className="mb-4 flex justify-center">
+            <div className="relative">
+              <img
+                src={previewUrl}
+                alt="Preview"
+                className="h-32 w-32 rounded-lg border-2 border-slate-200 object-contain p-2"
+              />
+              <button
+                onClick={() => {
+                  setSelectedFile(null);
+                  setPreviewUrl(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                className="absolute -top-2 -right-2 rounded-full bg-red-500 p-1 text-white hover:bg-red-600"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Error Message */}
+        {uploadError && (
+          <div className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">
+            <div className="font-medium mb-1">Upload failed:</div>
+            <div className="break-words">{uploadError}</div>
+          </div>
+        )}
+
+        {/* File Input */}
+        <div className="mb-4">
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            onChange={handleFileSelect}
+            className="hidden"
+            id="imageUpload"
+          />
+          <label
+            htmlFor="imageUpload"
+            className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 p-4 hover:border-blue-400 hover:bg-blue-50"
+          >
+            <svg className="h-6 w-6 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span className="text-sm text-slate-600">
+              {selectedFile ? selectedFile.name : "Click to select image"}
+            </span>
+          </label>
+          <p className="text-xs text-slate-500 mt-1 text-center">
+            Supports: JPEG, PNG, GIF, WebP (Max 5MB)
+          </p>
+        </div>
+
+        {/* Buttons */}
+        <div className="flex gap-2">
+          <button
+            onClick={handleUpload}
+            disabled={!selectedFile || isUploading}
+            className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isUploading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Uploading...
+              </span>
+            ) : (
+              "Upload Image"
+            )}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={isUploading}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      {/* Click outside to close */}
+      <div className="absolute inset-0 -z-10" onClick={onClose} />
+    </div>
+  );
+};
+
 export default function AddPlayers() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -117,9 +335,12 @@ export default function AddPlayers() {
   const [formData, setFormData] = useState<PlayerData>(emptyPlayer);
   const [players, setPlayers] = useState<PlayerData[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [viewingImage, setViewingImage] = useState<{
     url: string;
+    playerName: string;
+  } | null>(null);
+  const [uploadModal, setUploadModal] = useState<{
+    playerId: string;
     playerName: string;
   } | null>(null);
   
@@ -129,7 +350,6 @@ export default function AddPlayers() {
 
   // Check where the component is accessed from
   const isFromHome = location.state?.from === "home";
-  // const isFromLogin = location.state?.from === "login" || !isFromHome; // Default to login mode if no state
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
 
@@ -187,6 +407,65 @@ export default function AddPlayers() {
     }
   };
 
+  /* ===================== POST API ===================== */
+  const createPlayer = async (playerData: PlayerData) => {
+    try {
+      setLoading(true);
+      setApiError(null);
+
+      // Map your form data to API expected format
+      const apiPlayer = {
+        name: playerData.playerName,
+        position: playerData.playerPosition,
+        basePrice: 1000000, // Default base price
+        imageUrl: "" // Start with empty image URL
+      };
+
+      const res = await fetch(
+        "https://just-encouragement-production-671d.up.railway.app/project/api/players",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(apiPlayer),
+        }
+      );
+
+      if (!res.ok) {
+        const errorData = await res.text();
+        throw new Error(`API failed: ${res.status} - ${errorData}`);
+      }
+
+      const newPlayer: ApiPlayer = await res.json();
+      
+      // Map back to your PlayerData format and update state
+      const mappedPlayer: PlayerData = {
+        id: String(newPlayer.id),
+        playerName: newPlayer.name,
+        playerPosition: newPlayer.position,
+        playerCountry: playerData.playerCountry, // Keep from form
+        playerImage: null, // No image initially
+      };
+
+      setPlayers(prev => [...prev, mappedPlayer]);
+      
+      // Clear form on success
+      setFormData(emptyPlayer);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      return newPlayer;
+    } catch (err: any) {
+      setApiError(err?.message || "Failed to create player");
+      console.error("Error creating player:", err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Fetch players on component mount
   useEffect(() => {
     fetchPlayers();
@@ -207,47 +486,6 @@ export default function AddPlayers() {
     }));
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
-    if (!validTypes.includes(file.type)) {
-      alert("Please upload a valid image file (JPEG, PNG, GIF, WebP)");
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      alert("Image size should be less than 5MB");
-      return;
-    }
-
-    setIsUploading(true);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFormData((prev) => ({
-        ...prev,
-        playerImage: reader.result as string,
-      }));
-      setIsUploading(false);
-    };
-    reader.onerror = () => {
-      alert("Error uploading image");
-      setIsUploading(false);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removeImage = () => {
-    setFormData((prev) => ({
-      ...prev,
-      playerImage: null,
-    }));
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
   const startEdit = (player: PlayerData) => {
     // Only allow editing if from Login
     if (isFromHome) return;
@@ -258,9 +496,6 @@ export default function AddPlayers() {
   const cancelEdit = () => {
     setEditingId(null);
     setFormData(emptyPlayer);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   };
 
   const deletePlayer = (id: string) => {
@@ -270,11 +505,10 @@ export default function AddPlayers() {
     if (editingId === id) cancelEdit();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (
-      !formData.id ||
       !formData.playerName ||
       !formData.playerPosition ||
       !formData.playerCountry
@@ -283,25 +517,36 @@ export default function AddPlayers() {
       return;
     }
 
-    if (isEditing) {
-      setPlayers((prev) =>
-        prev.map((p) => (p.id === editingId ? { ...formData } : p))
-      );
-      cancelEdit();
-      return;
-    }
+    try {
+      if (isEditing) {
+        // For now, keep local update for edit
+        setPlayers((prev) =>
+          prev.map((p) => (p.id === editingId ? { ...formData } : p))
+        );
+        cancelEdit();
+      } else {
+        // Check if ID exists locally first (optional)
+        const exists = players.some((p) => p.id === formData.id);
+        if (exists && formData.id) {
+          alert("This ID already exists. Use another ID or leave ID field empty.");
+          return;
+        }
 
-    const exists = players.some((p) => p.id === formData.id);
-    if (exists) {
-      alert("This ID already exists. Use another ID.");
-      return;
+        // Create via API
+        await createPlayer(formData);
+      }
+    } catch (error) {
+      // Error already handled in createPlayer
     }
+  };
 
-    setPlayers((prev) => [...prev, formData]);
-    setFormData(emptyPlayer);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+  // Handle successful image upload
+  const handleImageUploadSuccess = (playerId: string, imageUrl: string) => {
+    setPlayers(prev =>
+      prev.map(p =>
+        p.id === playerId ? { ...p, playerImage: imageUrl } : p
+      )
+    );
   };
 
   // Open image in modal
@@ -312,6 +557,16 @@ export default function AddPlayers() {
   // Close image modal
   const closeImageModal = () => {
     setViewingImage(null);
+  };
+
+  // Open upload modal
+  const openUploadModal = (playerId: string, playerName: string) => {
+    setUploadModal({ playerId, playerName });
+  };
+
+  // Close upload modal
+  const closeUploadModal = () => {
+    setUploadModal(null);
   };
 
   // Handle Escape key to close modal
@@ -328,7 +583,7 @@ export default function AddPlayers() {
 
   return (
     <>
-      {/* Image Modal */}
+      {/* Image View Modal */}
       {viewingImage && (
         <ImageModal
           imageUrl={viewingImage.url}
@@ -337,17 +592,24 @@ export default function AddPlayers() {
         />
       )}
 
+      {/* Image Upload Modal */}
+      {uploadModal && (
+        <ImageUploadModal
+          playerId={uploadModal.playerId}
+          playerName={uploadModal.playerName}
+          onClose={closeUploadModal}
+          onUploadSuccess={(imageUrl) => {
+            handleImageUploadSuccess(uploadModal.playerId, imageUrl);
+          }}
+        />
+      )}
+
       <div className="min-h-screen bg-slate-50 p-6">
         <div className="mx-auto max-w-6xl space-y-6">
 
           {/* Top Bar with Back Button and Refresh */}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              onClick={() => navigate(-1)}
-              className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-200"
-            >
-              ← Back
-            </button>
+           <BackButton />
 
             <div className="flex items-center gap-3">
               {/* Access Mode Badge */}
@@ -412,15 +674,15 @@ export default function AddPlayers() {
               <form onSubmit={handleSubmit} className="mt-5">
                 <div className="flex flex-wrap items-end gap-4">
 
-                  {/* Player ID */}
+                  {/* Player ID - Optional now, as API generates it */}
                   <div className="flex flex-col">
-                    <label className="text-sm font-medium text-slate-700">ID</label>
+                    <label className="text-sm font-medium text-slate-700">ID (Optional)</label>
                     <input
                       type="text"
                       name="id"
                       value={formData.id}
                       onChange={handleChange}
-                      placeholder="Enter ID"
+                      placeholder="Auto-generated"
                       disabled={isEditing}
                       className={[
                         "w-24 rounded-xl border px-3 py-2 text-slate-900 shadow-sm outline-none",
@@ -432,7 +694,7 @@ export default function AddPlayers() {
 
                   {/* Player Name */}
                   <div className="flex flex-col">
-                    <label className="text-sm font-medium text-slate-700">Player Name</label>
+                    <label className="text-sm font-medium text-slate-700">Player Name *</label>
                     <input
                       type="text"
                       name="playerName"
@@ -440,12 +702,13 @@ export default function AddPlayers() {
                       onChange={handleChange}
                       placeholder="Enter player name"
                       className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                      required
                     />
                   </div>
 
                   {/* Player Position */}
                   <div className="flex flex-col">
-                    <label className="text-sm font-medium text-slate-700">Position</label>
+                    <label className="text-sm font-medium text-slate-700">Position *</label>
                     <input
                       type="text"
                       name="playerPosition"
@@ -453,12 +716,13 @@ export default function AddPlayers() {
                       onChange={handleChange}
                       placeholder="e.g., Striker, Midfielder"
                       className="w-48 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                      required
                     />
                   </div>
 
                   {/* Player Country */}
                   <div className="flex flex-col">
-                    <label className="text-sm font-medium text-slate-700">Country</label>
+                    <label className="text-sm font-medium text-slate-700">Country *</label>
                     <input
                       type="text"
                       name="playerCountry"
@@ -466,81 +730,8 @@ export default function AddPlayers() {
                       onChange={handleChange}
                       placeholder="e.g., Brazil, India"
                       className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                      required
                     />
-                  </div>
-
-                  {/* Player Image Upload */}
-                  <div className="flex flex-col">
-                    <label className="text-sm font-medium text-slate-700">Player Image</label>
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <input
-                          type="file"
-                          ref={fileInputRef}
-                          accept="image/*"
-                          onChange={handleImageUpload}
-                          className="hidden"
-                          id="playerImage"
-                        />
-                        <label
-                          htmlFor="playerImage"
-                          className={[
-                            "flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 shadow-sm transition-colors",
-                            "border-slate-200 hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100",
-                            isUploading ? "bg-slate-100 cursor-wait" : "bg-white",
-                          ].join(" ")}
-                        >
-                          {isUploading ? (
-                            <>
-                              <svg className="animate-spin h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                              <span className="text-sm text-slate-600">Uploading...</span>
-                            </>
-                          ) : (
-                            <>
-                              <svg
-                                className="h-5 w-5 text-slate-500"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                                />
-                              </svg>
-                              <span className="text-sm text-slate-700">Upload</span>
-                            </>
-                          )}
-                        </label>
-                      </div>
-                      
-                      {formData.playerImage && (
-                        <div className="relative group">
-                          <div 
-                            className="h-12 w-12 rounded-lg border border-slate-200 overflow-hidden bg-slate-100 cursor-pointer hover:opacity-80 transition-opacity shadow-sm"
-                            onClick={() => openImageModal(formData.playerImage!, formData.playerName || "Player")}
-                          >
-                            <img
-                              src={formData.playerImage}
-                              alt="Player preview"
-                              className="h-full w-full object-contain p-1"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={removeImage}
-                            className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center h-5 w-5 bg-red-500 text-white rounded-full text-xs hover:bg-red-600 shadow-sm"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      )}
-                    </div>
                   </div>
 
                   {/* Buttons */}
@@ -702,6 +893,12 @@ export default function AddPlayers() {
                                 >
                                   Delete
                                 </button>
+                                <button
+                                  disabled
+                                  className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400 cursor-not-allowed"
+                                >
+                                  Upload Image
+                                </button>
                               </>
                             ) : (
                               // Enabled buttons for Login view
@@ -722,6 +919,14 @@ export default function AddPlayers() {
                                 >
                                   Delete
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openUploadModal(p.id, p.playerName)}
+                                  disabled={loading}
+                                  className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 focus:outline-none focus:ring-4 focus:ring-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  Upload Image
+                                </button>
                               </>
                             )}
                           </div>
@@ -738,5 +943,3 @@ export default function AddPlayers() {
     </>
   );
 }
-
-
