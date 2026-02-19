@@ -8,7 +8,7 @@ interface Tour {
   status: 'active' | 'completed' | 'upcoming';
   teamsCount?: number;
   matchesCount?: number;
-  selectedMembers?: Member[]; // Add selected members to tour
+  selectedMembers?: Member[];
 }
 
 interface Member {
@@ -18,25 +18,41 @@ interface Member {
   teamName: string;
 }
 
+// API response interfaces
+interface ApiTournament {
+  id: number;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+}
+
 // Member Selection Modal Component
 const MemberSelectionModal: React.FC<{
   tour: Tour;
   onClose: () => void;
   onSave: (tourId: string, selectedMembers: Member[]) => void;
-}> = ({ tour, onClose, onSave }) => {
+  isAddingMembers?: boolean;
+}> = ({ tour, onClose, onSave, isAddingMembers = false }) => {
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<Member[]>(tour.selectedMembers || []);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectAll, setSelectAll] = useState(false);
 
-  // Fetch members from API
   useEffect(() => {
     const fetchMembers = async () => {
       try {
         setLoading(true);
         const res = await fetch(
-          "https://just-encouragement-production-671d.up.railway.app/project/api/members"
+          "https://just-encouragement-production-671d.up.railway.app/project/api/members",
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+          }
         );
         if (res.ok) {
           const data = await res.json();
@@ -52,7 +68,6 @@ const MemberSelectionModal: React.FC<{
     fetchMembers();
   }, []);
 
-  // Handle member selection
   const toggleMember = (member: Member) => {
     setSelectedMembers(prev => {
       const isSelected = prev.some(m => m.id === member.id);
@@ -64,7 +79,6 @@ const MemberSelectionModal: React.FC<{
     });
   };
 
-  // Handle select all
   const handleSelectAll = () => {
     if (selectAll) {
       setSelectedMembers([]);
@@ -74,23 +88,19 @@ const MemberSelectionModal: React.FC<{
     setSelectAll(!selectAll);
   };
 
-  // Filter members based on search
   const filteredMembers = members.filter(member =>
     member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     member.teamName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Handle save
   const handleSave = () => {
     onSave(tour.id, selectedMembers);
-    onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
       <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-xl">
-        
         {/* Header */}
         <div className="p-6 border-b border-slate-200">
           <div className="flex items-center justify-between">
@@ -112,7 +122,7 @@ const MemberSelectionModal: React.FC<{
             </button>
           </div>
 
-          {/* Search Bar */}
+          {/* Search Input */}
           <div className="mt-4 relative">
             <input
               type="text"
@@ -132,7 +142,7 @@ const MemberSelectionModal: React.FC<{
           </div>
         </div>
 
-        {/* Member List */}
+        {/* Members List */}
         <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
             <div className="flex justify-center items-center py-8">
@@ -209,7 +219,7 @@ const MemberSelectionModal: React.FC<{
         <div className="p-6 border-t border-slate-200">
           <div className="flex items-center justify-between mb-4">
             <span className="text-sm text-slate-600">
-              <span className="font-semibold">{selectedMembers.length}</span> members selected
+              <span className="font-semibold">{selectedMembers.length}</span> member{selectedMembers.length !== 1 ? 's' : ''} selected
             </span>
             <div className="flex gap-2">
               <button
@@ -220,15 +230,25 @@ const MemberSelectionModal: React.FC<{
               </button>
               <button
                 onClick={handleSave}
-                disabled={selectedMembers.length === 0}
+                disabled={selectedMembers.length === 0 || isAddingMembers}
                 className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Add {selectedMembers.length} Member{selectedMembers.length !== 1 ? 's' : ''} to Tournament
+                {isAddingMembers ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Adding...
+                  </span>
+                ) : (
+                  `Add ${selectedMembers.length} Member${selectedMembers.length !== 1 ? 's' : ''} to Tournament`
+                )}
               </button>
             </div>
           </div>
 
-          {/* Selected Members Preview */}
+          {/* Selected Members Tags */}
           {selectedMembers.length > 0 && (
             <div className="bg-slate-50 rounded-xl p-3">
               <p className="text-xs font-medium text-slate-500 mb-2">Selected members:</p>
@@ -270,36 +290,111 @@ const CreateTour: React.FC = () => {
   const [tourName, setTourName] = useState('');
   const [tours, setTours] = useState<Tour[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isAddingMembers, setIsAddingMembers] = useState(false);
   
-  // Modal state
   const [selectedTour, setSelectedTour] = useState<Tour | null>(null);
 
-  // Load tours from localStorage on component mount
+  // Fetch tours from API on component mount
   useEffect(() => {
+    const fetchTours = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch(
+          "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments",
+          {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        
+        if (response.ok) {
+          const apiTours: ApiTournament[] = await response.json();
+          
+          // Convert API tournaments to our Tour format
+          const convertedTours: Tour[] = apiTours.map(apiTour => ({
+            id: apiTour.id.toString(),
+            tourName: apiTour.name,
+            createdAt: apiTour.startDate || new Date().toISOString(),
+            status: mapApiStatus(apiTour.status),
+            teamsCount: 0,
+            matchesCount: 0,
+            selectedMembers: []
+          }));
+          
+          setTours(convertedTours);
+          
+          // Also save to localStorage as backup
+          localStorage.setItem('tours', JSON.stringify(convertedTours));
+        } else {
+          console.error('Failed to fetch tours:', response.status);
+          // Fallback to localStorage
+          loadFromLocalStorage();
+        }
+      } catch (error) {
+        console.error('Error fetching tours:', error);
+        // Fallback to localStorage
+        loadFromLocalStorage();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchTours();
+  }, []);
+
+  // Helper function to map API status to our status
+  const mapApiStatus = (apiStatus: string): Tour['status'] => {
+    switch (apiStatus?.toUpperCase()) {
+      case 'ACTIVE':
+        return 'active';
+      case 'COMPLETED':
+        return 'completed';
+      case 'UPCOMING':
+      default:
+        return 'upcoming';
+    }
+  };
+
+  // Load tours from localStorage
+  const loadFromLocalStorage = () => {
     const savedTours = localStorage.getItem('tours');
     if (savedTours) {
       try {
         setTours(JSON.parse(savedTours));
       } catch (error) {
-        console.error('Error loading tours:', error);
+        console.error('Error loading tours from localStorage:', error);
       }
     }
-  }, []);
+  };
 
   // Save tours to localStorage whenever they change
   useEffect(() => {
     if (tours.length > 0) {
       localStorage.setItem('tours', JSON.stringify(tours));
-    } else {
-      localStorage.removeItem('tours');
     }
   }, [tours]);
 
-  const handleCreateTour = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (apiError || successMessage) {
+      const timer = setTimeout(() => {
+        setApiError(null);
+        setSuccessMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [apiError, successMessage]);
+
+  const handleCreateTour = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!tourName.trim()) {
@@ -309,13 +404,41 @@ const CreateTour: React.FC = () => {
 
     setIsCreating(true);
     setError(null);
+    setApiError(null);
+    setSuccessMessage(null);
 
     try {
-      // Create new tour
+      const today = new Date().toISOString().split('T')[0];
+      
+      const tourData = {
+        name: tourName.trim(),
+        startDate: today,
+        endDate: today,
+        status: 'UPCOMING'
+      };
+
+      const response = await fetch(
+        "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments",
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify(tourData),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
       const newTour: Tour = {
-        id: Date.now().toString(),
+        id: result.id?.toString() || Date.now().toString(),
         tourName: tourName.trim(),
-        createdAt: new Date().toISOString(),
+        createdAt: today,
         status: 'upcoming',
         teamsCount: 0,
         matchesCount: 0,
@@ -324,8 +447,24 @@ const CreateTour: React.FC = () => {
 
       setTours(prev => [newTour, ...prev]);
       setTourName('');
+      setSuccessMessage('Tournament created successfully!');
+
     } catch (err: any) {
-      setError(err?.message || 'Failed to create tour');
+      console.error('Error creating tour:', err);
+      setApiError('Unable to connect to server. Saving locally only.');
+      
+      // Save locally even if API fails
+      const offlineTour: Tour = {
+        id: Date.now().toString(),
+        tourName: tourName.trim(),
+        createdAt: new Date().toISOString(),
+        status: 'upcoming',
+        teamsCount: 0,
+        matchesCount: 0,
+        selectedMembers: []
+      };
+      setTours(prev => [offlineTour, ...prev]);
+      setTourName('');
     } finally {
       setIsCreating(false);
     }
@@ -338,6 +477,7 @@ const CreateTour: React.FC = () => {
         setEditingId(null);
         setEditName('');
       }
+      setSuccessMessage('Tournament deleted successfully!');
     }
   };
 
@@ -363,6 +503,7 @@ const CreateTour: React.FC = () => {
       )
     );
     cancelEdit();
+    setSuccessMessage('Tournament updated successfully!');
   };
 
   const updateTourStatus = (id: string, newStatus: Tour['status']) => {
@@ -373,25 +514,105 @@ const CreateTour: React.FC = () => {
     );
   };
 
-  // Handle saving selected members to tour
-  const handleSaveMembers = (tourId: string, selectedMembers: Member[]) => {
-    setTours(prev =>
-      prev.map(t =>
-        t.id === tourId
-          ? {
-              ...t,
-              selectedMembers,
-              teamsCount: selectedMembers.length,
-              status: selectedMembers.length > 0 ? 'active' : t.status
-            }
-          : t
-      )
-    );
+  const handleSaveMembers = async (tourId: string, selectedMembers: Member[]) => {
+    try {
+      setIsAddingMembers(true);
+      
+      // Clean IDs if they contain # symbols and convert to numbers
+      const cleanTourId = tourId.replace('#', '');
+      const teamIds = selectedMembers.map(member => {
+        const cleanId = member.id.replace('#', '');
+        return parseInt(cleanId, 10);
+      });
+      
+      console.log('Adding members to tournament:', {
+        tournamentId: cleanTourId,
+        memberIds: teamIds,
+        members: selectedMembers
+      });
+
+      const requestBody = {
+        teamIds: teamIds
+      };
+
+      // Make the API call
+      const response = await fetch(
+        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/teams`,
+        {
+          method: 'POST',
+          headers: {
+            'accept': '*/*',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        }
+      );
+
+      console.log('Response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Try to parse response (might be empty)
+      let result;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        result = await response.text();
+      }
+      
+      console.log('API Response:', result);
+
+      // Update local state with selected members
+      setTours(prev =>
+        prev.map(t =>
+          t.id === tourId
+            ? {
+                ...t,
+                selectedMembers,
+                teamsCount: selectedMembers.length,
+                status: selectedMembers.length > 0 ? 'active' : t.status
+              }
+            : t
+        )
+      );
+      
+      setSuccessMessage('Members added successfully!');
+      setApiError(null);
+      
+      // Close the modal
+      setSelectedTour(null);
+      
+    } catch (error) {
+      console.error('Error adding members:', error);
+      
+      // Show error but still update local state
+      setApiError('Failed to sync with server, but members saved locally');
+      
+      // Update local state even if API fails
+      setTours(prev =>
+        prev.map(t =>
+          t.id === tourId
+            ? {
+                ...t,
+                selectedMembers,
+                teamsCount: selectedMembers.length,
+                status: selectedMembers.length > 0 ? 'active' : t.status
+              }
+            : t
+        )
+      );
+    } finally {
+      setIsAddingMembers(false);
+    }
   };
 
-  // Open member selection modal
   const openMemberModal = (tour: Tour, e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent event bubbling
+    e.stopPropagation();
     setSelectedTour(tour);
   };
 
@@ -417,32 +638,43 @@ const CreateTour: React.FC = () => {
     }
   };
 
-  // Filter tours based on status
   const filteredTours = tours.filter(tour => {
     if (filterStatus === 'all') return true;
     return tour.status === filterStatus;
   });
 
-  // Calculate stats
   const totalTours = tours.length;
   const activeTours = tours.filter(t => t.status === 'active').length;
   const upcomingTours = tours.filter(t => t.status === 'upcoming').length;
   const completedTours = tours.filter(t => t.status === 'completed').length;
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-4 md:p-6 flex items-center justify-center">
+        <div className="text-center">
+          <svg className="animate-spin h-10 w-10 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <p className="text-slate-600">Loading tournaments...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
       <div className="mx-auto max-w-5xl space-y-6">
         
-        {/* Member Selection Modal */}
         {selectedTour && (
           <MemberSelectionModal
             tour={selectedTour}
             onClose={() => setSelectedTour(null)}
             onSave={handleSaveMembers}
+            isAddingMembers={isAddingMembers}
           />
         )}
 
-        {/* Header with Back Button */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <button
             onClick={() => navigate(-1)}
@@ -461,7 +693,6 @@ const CreateTour: React.FC = () => {
           <div className="w-20 hidden sm:block"></div>
         </div>
 
-        {/* Create Tour Form */}
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">
             Create New Tour
@@ -505,9 +736,30 @@ const CreateTour: React.FC = () => {
               )}
             </button>
           </form>
+
+          {apiError && (
+            <div className="mt-4 p-3 bg-rose-50 border border-rose-200 rounded-xl">
+              <p className="text-sm text-rose-600 flex items-center gap-2">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {apiError}
+              </p>
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-xl">
+              <p className="text-sm text-green-600 flex items-center gap-2">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                {successMessage}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Stats Cards */}
         {tours.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
@@ -529,9 +781,7 @@ const CreateTour: React.FC = () => {
           </div>
         )}
 
-        {/* Tours List */}
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          {/* Header with Filter */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-semibold text-slate-900">
@@ -542,7 +792,6 @@ const CreateTour: React.FC = () => {
               </span>
             </div>
 
-            {/* Status Filter */}
             <div className="flex gap-2">
               {['all', 'upcoming', 'active', 'completed'].map((status) => (
                 <button
@@ -599,7 +848,6 @@ const CreateTour: React.FC = () => {
                   className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-slate-200 p-4 hover:bg-slate-50 transition-colors"
                 >
                   {editingId === tour.id ? (
-                    // Edit Mode
                     <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <input
                         type="text"
@@ -624,7 +872,6 @@ const CreateTour: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    // View Mode
                     <>
                       <div className="flex-1">
                         <div className="flex items-center flex-wrap gap-2">
@@ -660,7 +907,6 @@ const CreateTour: React.FC = () => {
                           )}
                         </div>
 
-                        {/* Show selected members preview */}
                         {tour.selectedMembers && tour.selectedMembers.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {tour.selectedMembers.slice(0, 3).map(m => (
