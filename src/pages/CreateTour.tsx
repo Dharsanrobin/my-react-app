@@ -56,6 +56,19 @@ const MemberSelectionModal: React.FC<{
         );
         if (res.ok) {
           const data = await res.json();
+          console.log('Raw API response for members:', data);
+          
+          // Log each member's ID type and value
+          data.forEach((member: any, index: number) => {
+            console.log(`Member ${index}:`, {
+              id: member.id,
+              idType: typeof member.id,
+              idValue: member.id,
+              name: member.name,
+              teamName: member.teamName
+            });
+          });
+          
           setMembers(data);
         }
       } catch (error) {
@@ -77,6 +90,7 @@ const MemberSelectionModal: React.FC<{
         return [...prev, member];
       }
     });
+    setSelectAll(false);
   };
 
   const handleSelectAll = () => {
@@ -158,7 +172,7 @@ const MemberSelectionModal: React.FC<{
                 <div className="flex items-center gap-2">
                   <input
                     type="checkbox"
-                    checked={selectAll}
+                    checked={selectAll && filteredMembers.length === selectedMembers.length}
                     onChange={handleSelectAll}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
@@ -199,7 +213,9 @@ const MemberSelectionModal: React.FC<{
                         <span className="inline-flex rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                           {member.teamName}
                         </span>
-                        <p className="text-xs text-slate-400 mt-1">ID: #{member.id}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          ID: {member.id} ({typeof member.id})
+                        </p>
                       </div>
                     </div>
                   );
@@ -258,11 +274,12 @@ const MemberSelectionModal: React.FC<{
                     key={m.id}
                     className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700"
                   >
-                    {m.name}
+                    {m.name} (ID: {m.id})
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setSelectedMembers(prev => prev.filter(mem => mem.id !== m.id));
+                        setSelectAll(false);
                       }}
                       className="hover:text-blue-900"
                     >
@@ -518,22 +535,35 @@ const CreateTour: React.FC = () => {
     try {
       setIsAddingMembers(true);
       
-      // Clean IDs if they contain # symbols and convert to numbers
+      // Log the raw selected members first
+      console.log('RAW SELECTED MEMBERS:', selectedMembers);
+      
+      // Clean tour ID if it contains # symbols
       const cleanTourId = tourId.replace('#', '');
+      
+      // Extract team IDs WITHOUT any parsing - send them exactly as they come from the API
       const teamIds = selectedMembers.map(member => {
-        const cleanId = member.id.replace('#', '');
-        return parseInt(cleanId, 10);
+        // Don't parse, don't replace, use the raw ID
+        const rawId = member.id;
+        console.log(`Member ${member.name}: raw ID = ${rawId} (${typeof rawId})`);
+        return rawId;
       });
       
-      console.log('Adding members to tournament:', {
-        tournamentId: cleanTourId,
-        memberIds: teamIds,
-        members: selectedMembers
-      });
+      console.log('Final team IDs to send (raw):', teamIds);
+      
+      if (teamIds.length === 0) {
+        setApiError('No team IDs found for selected members');
+        setIsAddingMembers(false);
+        return;
+      }
 
+      // Try sending as strings first, then as numbers if that fails
       const requestBody = {
         teamIds: teamIds
       };
+
+      console.log('Sending request to:', `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/teams`);
+      console.log('Request body:', JSON.stringify(requestBody, null, 2));
 
       // Make the API call
       const response = await fetch(
@@ -549,11 +579,41 @@ const CreateTour: React.FC = () => {
       );
 
       console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Error response:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}`);
+        
+        // Try with numbers if strings didn't work
+        if (teamIds.every(id => !isNaN(Number(id)))) {
+          console.log('Retrying with numeric IDs...');
+          const numericBody = {
+            teamIds: teamIds.map(id => Number(id))
+          };
+          
+          const retryResponse = await fetch(
+            `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/teams`,
+            {
+              method: 'POST',
+              headers: {
+                'accept': '*/*',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(numericBody),
+            }
+          );
+          
+          if (retryResponse.ok) {
+            console.log('Retry with numeric IDs succeeded!');
+          } else {
+            const retryError = await retryResponse.text();
+            console.error('Retry also failed:', retryError);
+            throw new Error(`HTTP error! status: ${retryResponse.status}`);
+          }
+        } else {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
       }
 
       // Try to parse response (might be empty)
