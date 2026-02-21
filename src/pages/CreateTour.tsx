@@ -1302,7 +1302,7 @@ const CreateTour: React.FC = () => {
                                 : 'border border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
                             }`}
                           >
-                            Generate
+                            Generatee
                           </button>
                         )}
                       </div>
