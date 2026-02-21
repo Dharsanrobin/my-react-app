@@ -323,8 +323,21 @@ const CreateTour: React.FC = () => {
     const fetchTours = async () => {
       try {
         setIsLoading(true);
+        
+        // First, try to load from localStorage to have data immediately
+        const savedTours = localStorage.getItem('tours');
+        if (savedTours) {
+          try {
+            const parsedTours = JSON.parse(savedTours);
+            setTours(parsedTours);
+          } catch (error) {
+            console.error('Error loading tours from localStorage:', error);
+          }
+        }
+        
+        // Then fetch from API to get latest data
         const response = await fetch(
-          "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments",
+          "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/tournamentTeams",
           {
             method: 'GET',
             headers: {
@@ -348,19 +361,53 @@ const CreateTour: React.FC = () => {
             selectedMembers: []
           }));
           
-          setTours(convertedTours);
-          
-          // Also save to localStorage as backup
-          localStorage.setItem('tours', JSON.stringify(convertedTours));
+          // Merge with localStorage data to preserve members
+          setTours(prev => {
+            // Get the latest from localStorage again to avoid race conditions
+            const latestLocalTours = localStorage.getItem('tours');
+            let localTours: Tour[] = [];
+            if (latestLocalTours) {
+              try {
+                localTours = JSON.parse(latestLocalTours);
+              } catch (error) {
+                console.error('Error parsing localStorage tours:', error);
+              }
+            }
+            
+            // Use prev if localTours is empty, otherwise use localTours
+            const existingTours = localTours.length > 0 ? localTours : prev;
+            
+            const mergedTours = convertedTours.map(apiTour => {
+              const existingTour = existingTours.find(t => t.id === apiTour.id);
+              if (existingTour && existingTour.selectedMembers && existingTour.selectedMembers.length > 0) {
+                return { 
+                  ...apiTour, 
+                  selectedMembers: existingTour.selectedMembers,
+                  teamsCount: existingTour.selectedMembers.length,
+                  status: existingTour.selectedMembers.length > 0 ? 'active' : apiTour.status
+                };
+              }
+              return apiTour;
+            });
+            
+            // Also include any tours that exist in localStorage but not in API (offline-created)
+            const localTourIds = new Set(mergedTours.map(t => t.id));
+            const additionalLocalTours = existingTours.filter(t => !localTourIds.has(t.id));
+            
+            const finalTours = [...mergedTours, ...additionalLocalTours];
+            
+            // Save merged data to localStorage
+            localStorage.setItem('tours', JSON.stringify(finalTours));
+            
+            return finalTours;
+          });
         } else {
           console.error('Failed to fetch tours:', response.status);
-          // Fallback to localStorage
-          loadFromLocalStorage();
+          // Keep using localStorage data if API fails
         }
       } catch (error) {
         console.error('Error fetching tours:', error);
-        // Fallback to localStorage
-        loadFromLocalStorage();
+        // Keep using localStorage data if API fails
       } finally {
         setIsLoading(false);
       }
@@ -379,18 +426,6 @@ const CreateTour: React.FC = () => {
       case 'UPCOMING':
       default:
         return 'upcoming';
-    }
-  };
-
-  // Load tours from localStorage
-  const loadFromLocalStorage = () => {
-    const savedTours = localStorage.getItem('tours');
-    if (savedTours) {
-      try {
-        setTours(JSON.parse(savedTours));
-      } catch (error) {
-        console.error('Error loading tours from localStorage:', error);
-      }
     }
   };
 
@@ -489,7 +524,11 @@ const CreateTour: React.FC = () => {
 
   const handleDeleteTour = (id: string) => {
     if (window.confirm('Are you sure you want to delete this tour?')) {
-      setTours(prev => prev.filter(t => t.id !== id));
+      setTours(prev => {
+        const updatedTours = prev.filter(t => t.id !== id);
+        localStorage.setItem('tours', JSON.stringify(updatedTours));
+        return updatedTours;
+      });
       if (editingId === id) {
         setEditingId(null);
         setEditName('');
@@ -514,21 +553,25 @@ const CreateTour: React.FC = () => {
       return;
     }
 
-    setTours(prev =>
-      prev.map(t =>
+    setTours(prev => {
+      const updatedTours = prev.map(t =>
         t.id === id ? { ...t, tourName: editName.trim() } : t
-      )
-    );
+      );
+      localStorage.setItem('tours', JSON.stringify(updatedTours));
+      return updatedTours;
+    });
     cancelEdit();
     setSuccessMessage('Tournament updated successfully!');
   };
 
   const updateTourStatus = (id: string, newStatus: Tour['status']) => {
-    setTours(prev =>
-      prev.map(t =>
+    setTours(prev => {
+      const updatedTours = prev.map(t =>
         t.id === id ? { ...t, status: newStatus } : t
-      )
-    );
+      );
+      localStorage.setItem('tours', JSON.stringify(updatedTours));
+      return updatedTours;
+    });
   };
 
   const handleSaveMembers = async (tourId: string, selectedMembers: Member[]) => {
@@ -627,9 +670,9 @@ const CreateTour: React.FC = () => {
       
       console.log('API Response:', result);
 
-      // Update local state with selected members
-      setTours(prev =>
-        prev.map(t =>
+      // Update local state with selected members and save to localStorage
+      setTours(prev => {
+        const updatedTours = prev.map(t =>
           t.id === tourId
             ? {
                 ...t,
@@ -638,8 +681,13 @@ const CreateTour: React.FC = () => {
                 status: selectedMembers.length > 0 ? 'active' : t.status
               }
             : t
-        )
-      );
+        );
+        
+        // Save to localStorage immediately
+        localStorage.setItem('tours', JSON.stringify(updatedTours));
+        
+        return updatedTours;
+      });
       
       setSuccessMessage('Members added successfully!');
       setApiError(null);
@@ -653,9 +701,9 @@ const CreateTour: React.FC = () => {
       // Show error but still update local state
       setApiError('Failed to sync with server, but members saved locally');
       
-      // Update local state even if API fails
-      setTours(prev =>
-        prev.map(t =>
+      // Update local state and localStorage even if API fails
+      setTours(prev => {
+        const updatedTours = prev.map(t =>
           t.id === tourId
             ? {
                 ...t,
@@ -664,8 +712,13 @@ const CreateTour: React.FC = () => {
                 status: selectedMembers.length > 0 ? 'active' : t.status
               }
             : t
-        )
-      );
+        );
+        
+        // Save to localStorage
+        localStorage.setItem('tours', JSON.stringify(updatedTours));
+        
+        return updatedTours;
+      });
     } finally {
       setIsAddingMembers(false);
     }
