@@ -501,6 +501,8 @@ const CreateTour: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isAddingMembers, setIsAddingMembers] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   
   const [selectedTour, setSelectedTour] = useState<Tour | null>(null);
   const [tourToGenerate, setTourToGenerate] = useState<Tour | null>(null);
@@ -701,19 +703,83 @@ const CreateTour: React.FC = () => {
     }
   };
 
-  const handleDeleteTour = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this tour?')) {
+  const handleDeleteTour = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this tour?')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setApiError(null);
+    setSuccessMessage(null);
+
+    try {
+      // Clean tour ID if it contains # symbols
+      const cleanTourId = id.replace('#', '');
+      
+      console.log(`Deleting tournament with ID: ${cleanTourId}`);
+
+      // Make API call to delete tournament
+      const response = await fetch(
+        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}?id=${cleanTourId}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'accept': '*/*',
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      console.log('Delete response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Try to parse response (might be empty)
+      let result;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+        console.log('Delete API Response:', result);
+      } else {
+        result = await response.text();
+        console.log('Delete API Response:', result);
+      }
+
+      // Remove from local state
       const updatedTours = tours.filter(t => t.id !== id);
       setTours(updatedTours);
       localStorage.setItem('tours', JSON.stringify(updatedTours));
+      
+      // Remove associated matches from localStorage
+      localStorage.removeItem(`matches_${id}`);
       
       if (editingId === id) {
         setEditingId(null);
         setEditName('');
       }
       
-      localStorage.removeItem(`matches_${id}`);
       setSuccessMessage('Tournament deleted successfully!');
+      
+    } catch (error) {
+      console.error('Error deleting tournament:', error);
+      setApiError('Failed to delete tournament from server. Removing locally only.');
+      
+      // Still remove from local state even if API fails
+      const updatedTours = tours.filter(t => t.id !== id);
+      setTours(updatedTours);
+      localStorage.setItem('tours', JSON.stringify(updatedTours));
+      localStorage.removeItem(`matches_${id}`);
+      
+      if (editingId === id) {
+        setEditingId(null);
+        setEditName('');
+      }
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -727,21 +793,93 @@ const CreateTour: React.FC = () => {
     setEditName('');
   };
 
-  const saveEdit = (id: string) => {
+  const saveEdit = async (id: string) => {
     if (!editName.trim()) {
       alert('Tour name cannot be empty');
       return;
     }
 
-    const updatedTours = tours.map(t =>
-      t.id === id ? { ...t, tourName: editName.trim() } : t
-    );
+    setIsUpdating(true);
+    setApiError(null);
     
-    setTours(updatedTours);
-    localStorage.setItem('tours', JSON.stringify(updatedTours));
-    
-    cancelEdit();
-    setSuccessMessage('Tournament updated successfully!');
+    try {
+      // Clean tour ID if it contains # symbols
+      const cleanTourId = id.replace('#', '');
+      
+      console.log(`Updating tournament ${cleanTourId} with name: ${editName.trim()}`);
+
+      // Find the current tour to preserve other data
+      const currentTour = tours.find(t => t.id === id);
+      
+      // Prepare the updated tournament data
+      const updateData = {
+        name: editName.trim(),
+        // Include other fields if required by your API
+        ...(currentTour?.createdAt && { startDate: currentTour.createdAt.split('T')[0] }),
+        ...(currentTour?.createdAt && { endDate: currentTour.createdAt.split('T')[0] }),
+        status: currentTour?.status?.toUpperCase() || 'UPCOMING'
+      };
+
+      // Make API call to update tournament - using PUT method with query parameters
+      const response = await fetch(
+        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}?id=${cleanTourId}&name=${encodeURIComponent(editName.trim())}`,
+        {
+          method: 'PUT',
+          headers: {
+            'accept': '*/*',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updateData),
+        }
+      );
+
+      console.log('Update response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Try to parse response (might be empty)
+      let result;
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+        console.log('Update API Response:', result);
+      } else {
+        result = await response.text();
+        console.log('Update API Response:', result);
+      }
+
+      // Update local state
+      const updatedTours = tours.map(t =>
+        t.id === id ? { ...t, tourName: editName.trim() } : t
+      );
+      
+      setTours(updatedTours);
+      localStorage.setItem('tours', JSON.stringify(updatedTours));
+      
+      setSuccessMessage('Tournament updated successfully!');
+      cancelEdit();
+      
+    } catch (error) {
+      console.error('Error updating tournament:', error);
+      
+      // Fallback: Update locally even if API fails
+      setApiError('Failed to sync with server, but changes saved locally');
+      
+      const updatedTours = tours.map(t =>
+        t.id === id ? { ...t, tourName: editName.trim() } : t
+      );
+      
+      setTours(updatedTours);
+      localStorage.setItem('tours', JSON.stringify(updatedTours));
+      
+      cancelEdit();
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const updateTourStatus = (id: string, newStatus: Tour['status']) => {
@@ -1190,17 +1328,20 @@ const CreateTour: React.FC = () => {
                         onChange={(e) => setEditName(e.target.value)}
                         className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
                         autoFocus
+                        disabled={isUpdating}
                       />
                       <div className="flex gap-2">
                         <button
                           onClick={() => saveEdit(tour.id)}
-                          className="flex-1 sm:flex-none rounded-lg bg-green-600 px-4 py-2 text-xs font-semibold text-white hover:bg-green-700"
+                          disabled={isUpdating}
+                          className="flex-1 sm:flex-none rounded-lg bg-green-600 px-4 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
                         >
-                          Save
+                          {isUpdating ? 'Saving...' : 'Save'}
                         </button>
                         <button
                           onClick={cancelEdit}
-                          className="flex-1 sm:flex-none rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          disabled={isUpdating}
+                          className="flex-1 sm:flex-none rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                         >
                           Cancel
                         </button>
@@ -1269,15 +1410,19 @@ const CreateTour: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => startEdit(tour)}
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                          disabled={isUpdating}
+                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDeleteTour(tour.id)}
-                          className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                          disabled={isDeleting}
+                          className={`rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 ${
+                            isDeleting ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
                         >
-                          Delete
+                          {isDeleting ? 'Deleting...' : 'Delete'}
                         </button>
                         <button
                           onClick={(e) => openMemberModal(tour, e)}
@@ -1302,7 +1447,7 @@ const CreateTour: React.FC = () => {
                                 : 'border border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
                             }`}
                           >
-                            Generatee
+                            Generate
                           </button>
                         )}
                       </div>
