@@ -36,19 +36,259 @@ interface ApiTournament {
   status: string;
 }
 
+// Delete Confirmation Modal Component
+const DeleteConfirmationModal: React.FC<{
+  tour: Tour;
+  onClose: () => void;
+  onConfirm: () => void;
+  isDeleting?: boolean;
+}> = ({ tour, onClose, onConfirm, isDeleting = false }) => {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-2xl max-w-md w-full p-6">
+        <div className="flex items-center justify-center w-12 h-12 rounded-full bg-rose-100 mb-4 mx-auto">
+          <svg className="h-6 w-6 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        
+        <h3 className="text-xl font-semibold text-slate-900 text-center mb-2">
+          Delete Tournament
+        </h3>
+        
+        <p className="text-sm text-slate-500 text-center mb-6">
+          Are you sure you want to delete <span className="font-semibold text-slate-700">"{tour.tourName}"</span>? 
+          This action cannot be undone.
+        </p>
+
+        <div className="bg-rose-50 rounded-xl p-4 mb-6">
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-rose-700">Tournament Name:</span>
+              <span className="font-medium text-rose-900">{tour.tourName}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-rose-700">Status:</span>
+              <span className="font-medium text-rose-900 capitalize">{tour.status}</span>
+            </div>
+            {tour.selectedMembers && (
+              <div className="flex justify-between text-sm">
+                <span className="text-rose-700">Members:</span>
+                <span className="font-medium text-rose-900">{tour.selectedMembers.length}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-semibold"
+            disabled={isDeleting}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isDeleting}
+            className="flex-1 px-4 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 font-semibold"
+          >
+            {isDeleting ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Deleting...
+              </span>
+            ) : (
+              'Delete Tournament'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Generated Tournament View Component
 const GeneratedTournamentView: React.FC<{
   tour: Tour;
   onClose: () => void;
 }> = ({ tour, onClose }) => {
-  const [matches, setMatches] = useState<Match[]>([]);
+  const [matches, setMatches] = useState<any[]>([]);
+  const [selectedMatch, setSelectedMatch] = useState<any | null>(null);
+  const [scoreA, setScoreA] = useState<string>('');
+  const [scoreB, setScoreB] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    fetchMatches();
+  }, [tour.id]);
+
+const fetchMatches = async () => {
+  setLoading(true);
+  setError(null);
+  try {
+    const cleanTourId = tour.id.replace('#', '');
+    console.log('Fetching matches for tournament:', cleanTourId);
+    
+    const response = await fetch(
+      `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/matches`,
+      {
+        headers: {
+          'accept': '*/*'
+        }
+      }
+    );
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('Matches fetched:', data);
+      
+      // Ensure we have an array
+      const matchesArray = Array.isArray(data) ? data : [];
+      setMatches(matchesArray);
+      
+      // Also save to localStorage as backup
+      localStorage.setItem(`matches_${tour.id}`, JSON.stringify(matchesArray));
+    } else {
+      const errorText = await response.text();
+      console.error('Failed to fetch matches:', response.status, errorText);
+      
+      // Try to parse error message
+      try {
+        const errorData = JSON.parse(errorText);
+        setError(errorData.message || `Failed to load matches (Status: ${response.status})`);
+      } catch {
+        setError(`Failed to load matches (Status: ${response.status})`);
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching matches:', error);
+    setError('Network error. Please check your connection.');
+    
+    // Fallback to localStorage
     const savedMatches = localStorage.getItem(`matches_${tour.id}`);
     if (savedMatches) {
-      setMatches(JSON.parse(savedMatches));
+      try {
+        const parsedMatches = JSON.parse(savedMatches);
+        setMatches(parsedMatches);
+        setError(null); // Clear error if we have local data
+      } catch (e) {
+        console.error('Error parsing saved matches:', e);
+      }
     }
-  }, [tour.id]);
+  } finally {
+    setLoading(false);
+  }
+};
+
+  const handleAddScore = (match: any) => {
+    setSelectedMatch(match);
+    setScoreA(match.scoreA?.toString() || '');
+    setScoreB(match.scoreB?.toString() || '');
+  };
+
+const handleSubmitScore = async () => {
+  if (!selectedMatch || !scoreA.trim() || !scoreB.trim()) return;
+
+  setIsSubmitting(true);
+  setError(null);
+  
+  try {
+    const cleanTourId = tour.id.replace('#', '');
+    const matchId = selectedMatch.matchId;
+    
+    const payload = {
+      scoreA: parseInt(scoreA),
+      scoreB: parseInt(scoreB)
+    };
+    
+    console.log('Submitting score:', {
+      url: `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/matches/${matchId}/score`,
+      payload: payload
+    });
+
+    const response = await fetch(
+      `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/matches/${matchId}/score`,
+      {
+        method: 'PUT',
+        headers: {
+          'accept': '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }
+    );
+
+    console.log('Response status:', response.status);
+    
+    // Try to get response body for error details
+    let responseData;
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      responseData = await response.json();
+    } else {
+      responseData = await response.text();
+    }
+    
+    console.log('Response data:', responseData);
+
+    if (response.ok) {
+      // Success - update local state
+      const updatedMatches = matches.map(m =>
+        m.matchId === selectedMatch.matchId
+          ? {
+              ...m,
+              scoreA: parseInt(scoreA),
+              scoreB: parseInt(scoreB),
+              status: 'COMPLETED'
+            }
+          : m
+      );
+      
+      setMatches(updatedMatches);
+      localStorage.setItem(`matches_${tour.id}`, JSON.stringify(updatedMatches));
+      
+      // Close modal and reset
+      setSelectedMatch(null);
+      setScoreA('');
+      setScoreB('');
+      setError(null);
+      
+      console.log('Score updated successfully!');
+      
+      // Refresh matches to get latest data
+      fetchMatches();
+    } else {
+      // Handle specific error status codes
+      if (response.status === 404) {
+        setError('Match not found. Please refresh and try again.');
+      } else if (response.status === 400) {
+        setError('Invalid score values. Please check and try again.');
+      } else if (response.status === 500) {
+        setError('Server error. Please try again later.');
+      } else {
+        setError(`Failed to update score (Status: ${response.status}). Please try again.`);
+      }
+    }
+    
+  } catch (error) {
+    console.error('Error updating score:', error);
+    setError('Network error. Please check your connection and try again.');
+  } finally {
+    setIsSubmitting(false);
+  }
+};
+
+  const handleCloseModal = () => {
+    setSelectedMatch(null);
+    setScoreA('');
+    setScoreB('');
+  };
 
   if (!tour.selectedMembers || tour.selectedMembers.length < 2) {
     return (
@@ -67,9 +307,13 @@ const GeneratedTournamentView: React.FC<{
     );
   }
 
+  // Separate matches by completion status
+  const matchesWithScore = matches.filter(m => m.scoreA > 0 || m.scoreB > 0);
+  const matchesWithoutScore = matches.filter(m => m.scoreA === 0 && m.scoreB === 0);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[90vh] flex flex-col">
         <div className="p-6 border-b border-slate-200">
           <div className="flex items-center justify-between">
             <div>
@@ -77,7 +321,7 @@ const GeneratedTournamentView: React.FC<{
                 {tour.tourName} - Tournament Matches
               </h3>
               <p className="text-sm text-slate-500 mt-1">
-                {matches.length} matches generated with {tour.selectedMembers.length} players
+                Total Matches: {matches.length} | Completed: {matchesWithScore.length} | Pending: {matchesWithoutScore.length}
               </p>
             </div>
             <button
@@ -99,66 +343,266 @@ const GeneratedTournamentView: React.FC<{
                 key={member.id}
                 className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-sm font-medium text-blue-700"
               >
-                {index + 1}. {member.name} ({member.teamName})
+                {index + 1}. {member.name}
               </span>
             ))}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          <h4 className="text-sm font-semibold text-slate-700 mb-4">All Matches (Round Robin)</h4>
-          <div className="grid gap-3">
-            {matches.map((match, index) => (
-              <div
-                key={match.id}
-                className="flex items-center justify-between p-4 rounded-xl border border-slate-200 bg-white hover:border-blue-200 transition-colors"
+          {loading ? (
+            <div className="flex justify-center items-center py-12">
+              <svg className="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+          ) : error ? (
+            <div className="text-center py-12">
+              <p className="text-rose-600 mb-4">{error}</p>
+              <button
+                onClick={fetchMatches}
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700"
               >
-                <div className="flex items-center gap-4 flex-1">
-                  <span className="text-sm font-medium text-slate-400 w-8">#{index + 1}</span>
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className="flex-1 text-right">
-                      <span className="font-medium text-slate-900">{match.team1.name}</span>
-                      <p className="text-xs text-slate-500">{match.team1.teamName}</p>
-                    </div>
-                    <div className="px-3 py-1 bg-slate-100 rounded-full">
-                      <span className="text-sm font-semibold text-slate-700">VS</span>
-                    </div>
-                    <div className="flex-1 text-left">
-                      <span className="font-medium text-slate-900">{match.team2.name}</span>
-                      <p className="text-xs text-slate-500">{match.team2.teamName}</p>
-                    </div>
+                Retry
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Pending Matches Section */}
+              {matchesWithoutScore.length > 0 && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
+                    Pending Matches
+                  </h4>
+                  <div className="grid gap-4">
+                    {matchesWithoutScore.map((match, index) => (
+                      <div
+                        key={match.matchId}
+                        className="flex flex-col p-4 rounded-xl border border-slate-200 bg-white hover:border-blue-200 transition-colors"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 flex-1">
+                            <span className="text-sm font-medium text-slate-400 w-12">
+                              #{index + 1}
+                            </span>
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className="flex-1 text-right">
+                                <span className="font-medium text-slate-900">{match.teamAName}</span>
+                              </div>
+                              
+                              <div className="px-3 py-1 bg-slate-100 rounded-full">
+                                <span className="text-sm font-semibold text-slate-700">VS</span>
+                              </div>
+                              
+                              <div className="flex-1 text-left">
+                                <span className="font-medium text-slate-900">{match.teamBName}</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => handleAddScore(match)}
+                            className="ml-4 rounded-full bg-green-600 px-4 py-2 text-xs font-semibold text-white hover:bg-green-700 transition-colors"
+                          >
+                            Add Score
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <select
-                  value={match.status || 'pending'}
-                  onChange={(e) => {
-                    const updatedMatches = matches.map(m =>
-                      m.id === match.id ? { ...m, status: e.target.value as 'pending' | 'completed' } : m
-                    );
-                    setMatches(updatedMatches);
-                    localStorage.setItem(`matches_${tour.id}`, JSON.stringify(updatedMatches));
-                  }}
-                  className="ml-4 text-xs rounded-full px-3 py-1 border-0 bg-slate-100 text-slate-700"
-                >
-                  <option value="pending">Pending</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </div>
-            ))}
+              )}
+
+              {/* Completed Matches Section */}
+              {matchesWithScore.length > 0 && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
+                    Completed Matches
+                  </h4>
+                  <div className="grid gap-4">
+                    {matchesWithScore.map((match, index) => (
+                      <div
+                        key={match.matchId}
+                        className="flex flex-col p-4 rounded-xl border border-green-200 bg-green-50"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 flex-1">
+                            <span className="text-sm font-medium text-slate-400 w-12">
+                              #{index + 1}
+                            </span>
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className="flex-1 text-right">
+                                <span className="font-medium text-slate-900">{match.teamAName}</span>
+                              </div>
+                              
+                              <div className="px-4 py-2 bg-white rounded-lg shadow-sm">
+                                <span className="text-sm font-bold text-green-700">
+                                  {match.scoreA} - {match.scoreB}
+                                </span>
+                              </div>
+                              
+                              <div className="flex-1 text-left">
+                                <span className="font-medium text-slate-900">{match.teamBName}</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => handleAddScore(match)}
+                            className="ml-4 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 transition-colors"
+                          >
+                            Edit Score
+                          </button>
+                        </div>
+                        
+                        <div className="mt-3 pt-3 border-t border-green-200 flex justify-between items-center">
+                          <span className="text-xs text-green-700 flex items-center gap-1">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Match Completed
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            Status: {match.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-slate-200 flex justify-between">
+          <button
+            onClick={fetchMatches}
+            className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-2"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+
+      {/* Score Input Modal */}
+     {/* Score Input Modal */}
+{selectedMatch && (
+  <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
+    <div className="bg-white rounded-2xl max-w-md w-full p-6">
+      <h3 className="text-xl font-semibold text-slate-900 mb-4">
+        {selectedMatch.scoreA > 0 || selectedMatch.scoreB > 0 ? 'Edit Score' : 'Add Score'}
+      </h3>
+      
+      {/* Error message */}
+      {error && (
+        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl">
+          <div className="flex items-start gap-2">
+            <svg className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-sm text-rose-600">{error}</p>
+              <button
+                onClick={() => {
+                  setError(null);
+                  handleSubmitScore();
+                }}
+                className="mt-2 text-xs font-semibold text-rose-700 hover:text-rose-800"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-center flex-1">
+            <p className="font-semibold text-slate-900">{selectedMatch.teamAName}</p>
+          </div>
+          <div className="px-4">
+            <span className="text-sm font-semibold text-slate-400">VS</span>
+          </div>
+          <div className="text-center flex-1">
+            <p className="font-semibold text-slate-900">{selectedMatch.teamBName}</p>
           </div>
         </div>
 
-        <div className="p-6 border-t border-slate-200">
-          <div className="flex justify-end">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200"
-            >
-              Close
-            </button>
+        <div className="flex items-center gap-4">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              {selectedMatch.teamAName}'s Score
+            </label>
+            <input
+              type="number"
+              value={scoreA}
+              onChange={(e) => setScoreA(e.target.value)}
+              min="0"
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg font-semibold focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+              placeholder="0"
+              autoFocus
+              disabled={isSubmitting}
+            />
+          </div>
+          <div className="text-sm font-semibold text-slate-400">-</div>
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              {selectedMatch.teamBName}'s Score
+            </label>
+            <input
+              type="number"
+              value={scoreB}
+              onChange={(e) => setScoreB(e.target.value)}
+              min="0"
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg font-semibold focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+              placeholder="0"
+              disabled={isSubmitting}
+            />
           </div>
         </div>
       </div>
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleCloseModal}
+          className="flex-1 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-semibold"
+          disabled={isSubmitting}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmitScore}
+          disabled={!scoreA.trim() || !scoreB.trim() || isSubmitting}
+          className="flex-1 px-4 py-2 rounded-xl bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-semibold"
+        >
+          {isSubmitting ? (
+            <span className="flex items-center justify-center gap-2">
+              <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Saving...
+            </span>
+          ) : (
+            'Save Score'
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 };
@@ -501,8 +945,9 @@ const CreateTour: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isAddingMembers, setIsAddingMembers] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [tourToDelete, setTourToDelete] = useState<Tour | null>(null);
   
   const [selectedTour, setSelectedTour] = useState<Tour | null>(null);
   const [tourToGenerate, setTourToGenerate] = useState<Tour | null>(null);
@@ -704,21 +1149,15 @@ const CreateTour: React.FC = () => {
   };
 
   const handleDeleteTour = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this tour?')) {
-      return;
-    }
-
-    setIsDeleting(true);
+    setDeletingId(id);
     setApiError(null);
     setSuccessMessage(null);
 
     try {
-      // Clean tour ID if it contains # symbols
       const cleanTourId = id.replace('#', '');
       
       console.log(`Deleting tournament with ID: ${cleanTourId}`);
 
-      // Make API call to delete tournament
       const response = await fetch(
         `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}?id=${cleanTourId}`,
         {
@@ -738,7 +1177,6 @@ const CreateTour: React.FC = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Try to parse response (might be empty)
       let result;
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
@@ -749,12 +1187,10 @@ const CreateTour: React.FC = () => {
         console.log('Delete API Response:', result);
       }
 
-      // Remove from local state
       const updatedTours = tours.filter(t => t.id !== id);
       setTours(updatedTours);
       localStorage.setItem('tours', JSON.stringify(updatedTours));
       
-      // Remove associated matches from localStorage
       localStorage.removeItem(`matches_${id}`);
       
       if (editingId === id) {
@@ -763,12 +1199,12 @@ const CreateTour: React.FC = () => {
       }
       
       setSuccessMessage('Tournament deleted successfully!');
+      setTourToDelete(null);
       
     } catch (error) {
       console.error('Error deleting tournament:', error);
       setApiError('Failed to delete tournament from server. Removing locally only.');
       
-      // Still remove from local state even if API fails
       const updatedTours = tours.filter(t => t.id !== id);
       setTours(updatedTours);
       localStorage.setItem('tours', JSON.stringify(updatedTours));
@@ -778,8 +1214,9 @@ const CreateTour: React.FC = () => {
         setEditingId(null);
         setEditName('');
       }
+      setTourToDelete(null);
     } finally {
-      setIsDeleting(false);
+      setDeletingId(null);
     }
   };
 
@@ -803,24 +1240,19 @@ const CreateTour: React.FC = () => {
     setApiError(null);
     
     try {
-      // Clean tour ID if it contains # symbols
       const cleanTourId = id.replace('#', '');
       
       console.log(`Updating tournament ${cleanTourId} with name: ${editName.trim()}`);
 
-      // Find the current tour to preserve other data
       const currentTour = tours.find(t => t.id === id);
       
-      // Prepare the updated tournament data
       const updateData = {
         name: editName.trim(),
-        // Include other fields if required by your API
         ...(currentTour?.createdAt && { startDate: currentTour.createdAt.split('T')[0] }),
         ...(currentTour?.createdAt && { endDate: currentTour.createdAt.split('T')[0] }),
         status: currentTour?.status?.toUpperCase() || 'UPCOMING'
       };
 
-      // Make API call to update tournament - using PUT method with query parameters
       const response = await fetch(
         `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}?id=${cleanTourId}&name=${encodeURIComponent(editName.trim())}`,
         {
@@ -841,7 +1273,6 @@ const CreateTour: React.FC = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Try to parse response (might be empty)
       let result;
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
@@ -852,7 +1283,6 @@ const CreateTour: React.FC = () => {
         console.log('Update API Response:', result);
       }
 
-      // Update local state
       const updatedTours = tours.map(t =>
         t.id === id ? { ...t, tourName: editName.trim() } : t
       );
@@ -866,7 +1296,6 @@ const CreateTour: React.FC = () => {
     } catch (error) {
       console.error('Error updating tournament:', error);
       
-      // Fallback: Update locally even if API fails
       setApiError('Failed to sync with server, but changes saved locally');
       
       const updatedTours = tours.map(t =>
@@ -1073,6 +1502,11 @@ const CreateTour: React.FC = () => {
     setViewingTour(tour);
   };
 
+  const openDeleteModal = (tour: Tour, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTourToDelete(tour);
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -1122,6 +1556,16 @@ const CreateTour: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
       <div className="mx-auto max-w-5xl space-y-6">
+        
+        {/* Delete Confirmation Modal */}
+        {tourToDelete && (
+          <DeleteConfirmationModal
+            tour={tourToDelete}
+            onClose={() => setTourToDelete(null)}
+            onConfirm={() => handleDeleteTour(tourToDelete.id)}
+            isDeleting={deletingId === tourToDelete.id}
+          />
+        )}
         
         {selectedTour && (
           <MemberSelectionModal
@@ -1416,17 +1860,32 @@ const CreateTour: React.FC = () => {
                           Edit
                         </button>
                         <button
-                          onClick={() => handleDeleteTour(tour.id)}
-                          disabled={isDeleting}
+                          onClick={(e) => openDeleteModal(tour, e)}
+                          disabled={deletingId === tour.id}
                           className={`rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 ${
-                            isDeleting ? 'opacity-50 cursor-not-allowed' : ''
+                            deletingId === tour.id ? 'opacity-50 cursor-not-allowed' : ''
                           }`}
                         >
-                          {isDeleting ? 'Deleting...' : 'Delete'}
+                          {deletingId === tour.id ? (
+                            <span className="flex items-center gap-1">
+                              <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Deleting...
+                            </span>
+                          ) : (
+                            'Delete'
+                          )}
                         </button>
                         <button
                           onClick={(e) => openMemberModal(tour, e)}
-                          className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                          disabled={tour.isGenerated}
+                          className={`rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold ${
+                            tour.isGenerated
+                              ? 'bg-slate-50 text-slate-400 cursor-not-allowed border-slate-200'
+                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200'
+                          }`}
                         >
                           Add Members
                         </button>
