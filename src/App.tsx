@@ -9,6 +9,7 @@ import AddPlayers from "./pages/AddPlayers";
 
 import AuthLogin from "./pages/AuthLogin";
 import ProtectedRoute from "./components/ProtectedRoute";
+import Standing from "./pages/Standing";
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/Members" element={<Members />} />
         <Route path="/CreateTour" element={<CreateTour />} />
         <Route path="/AddPlayers" element={<AddPlayers />} />
+         <Route path="/Standing" element={<Standing />} />
 
         {/* old login inside dashboard */}
         <Route path="/login" element={<Login />} />
