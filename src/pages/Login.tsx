@@ -9,6 +9,7 @@ export default function Login() {
     { to: "/AddPlayers", label: "Add Players", icon: "👥", desc: "Manage users and teams", state: { from: "login" } },
 
     { to: "/CreateTour", label: "Create Tournament", icon: "➕", desc: "Create a new tournament", state: { from: "login" } },
+    { to: "/Standing", label: "Standing", icon: "🏆", desc: "View tournament standings", state: { from: "login" } },
   ];
 
   return (
