@@ -1,94 +1,59 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-type LoginMode = "email" | "mobile";
 
 export default function AuthLogin() {
   const navigate = useNavigate();
 
-  const [mode, setMode] = useState<LoginMode>("email");
-
-  // Email login
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  // Mobile login
-  const [mobile, setMobile] = useState("");
-  const [otp, setOtp] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-
-  // Demo OTP (replace with real API)
-  const DEMO_OTP = "123456";
+  const [isLoading, setIsLoading] = useState(false);
 
   // ✅ When login page opens, logout user (prevents forward-bypass)
   useEffect(() => {
+    localStorage.removeItem("token");
     localStorage.removeItem("isAuth");
   }, []);
 
-  const canSendOtp = useMemo(() => {
-    // simple validation: 10 digits
-    return /^\d{10}$/.test(mobile);
-  }, [mobile]);
-
-  const handleSendOtp = () => {
-    if (!canSendOtp) {
-      alert("Enter a valid 10-digit mobile number.");
-      return;
-    }
-
-    // demo: mark otp sent (in real app call API)
-    setOtpSent(true);
-    setOtp("");
-    alert(`OTP sent (demo OTP is ${DEMO_OTP})`);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // ✅ Email login
-    if (mode === "email") {
-      if (!email || !password) {
-        alert("Please fill all fields.");
-        return;
+    if (!email || !password) {
+      alert("Please fill all fields.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('http://localhost:8080/project/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'accept': '*/*'
+        },
+        body: JSON.stringify({
+          username: email,
+          password: password
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
       }
 
-      // demo credentials
-      if (email === "admin@gmail.com" && password === "admin123") {
-        localStorage.setItem("isAuth", "true");
-        navigate("/");
-      } else {
-        alert("Invalid email/password.");
-      }
-      return;
-    }
-
-    // ✅ Mobile login
-    if (!otpSent) {
-      alert("Please click Send OTP first.");
-      return;
-    }
-
-    if (!canSendOtp) {
-      alert("Enter a valid 10-digit mobile number.");
-      return;
-    }
-
-    if (!otp) {
-      alert("Please enter OTP.");
-      return;
-    }
-
-    if (otp === DEMO_OTP) {
+      const data = await response.json();
+      
+      // Store the token
+      localStorage.setItem("token", data.token);
       localStorage.setItem("isAuth", "true");
+      
       navigate("/");
-    } else {
-      alert("Invalid OTP. Try again.");
+    } catch (error) {
+      console.error('Login error:', error);
+      alert("Invalid email/password or server error.");
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  const resetMobileFlow = () => {
-    setOtpSent(false);
-    setOtp("");
   };
 
   return (
@@ -105,151 +70,52 @@ export default function AuthLogin() {
           Login to access your dashboard
         </p>
 
-        {/* Mode Toggle */}
-        <div className="mb-6 grid grid-cols-2 rounded-2xl bg-white ring-1 ring-slate-200 p-1">
-          <button
-            type="button"
-            onClick={() => {
-              setMode("email");
-              resetMobileFlow();
-            }}
-            className={[
-              "rounded-xl py-2 text-sm font-semibold transition",
-              mode === "email"
-                ? "bg-slate-900 text-white shadow"
-                : "text-slate-700 hover:bg-slate-50",
-            ].join(" ")}
-          >
-            Email
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMode("mobile");
-              setEmail("");
-              setPassword("");
-            }}
-            className={[
-              "rounded-xl py-2 text-sm font-semibold transition",
-              mode === "mobile"
-                ? "bg-slate-900 text-white shadow"
-                : "text-slate-700 hover:bg-slate-50",
-            ].join(" ")}
-          >
-            Mobile
-          </button>
-        </div>
-
         <form className="space-y-5" onSubmit={handleSubmit}>
-          {/* EMAIL MODE */}
-          {mode === "email" && (
-            <>
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  className="mt-1 w-full rounded-xl bg-white px-4 py-3 border border-slate-300 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-                  placeholder="admin@gmail.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700">
+              Email
+            </label>
+            <input
+              type="email"
+              className="mt-1 w-full rounded-xl bg-white px-4 py-3 border border-slate-300 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50 disabled:cursor-not-allowed"
+              placeholder="admin@gmail.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading}
+            />
+          </div>
 
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  className="mt-1 w-full rounded-xl bg-white px-4 py-3 border border-slate-300 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-                  placeholder="admin123"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-            </>
-          )}
+          <div>
+            <label className="text-sm font-medium text-slate-700">
+              Password
+            </label>
+            <input
+              type="password"
+              className="mt-1 w-full rounded-xl bg-white px-4 py-3 border border-slate-300 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 disabled:bg-slate-50 disabled:cursor-not-allowed"
+              placeholder="admin123"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+            />
+          </div>
 
-          {/* MOBILE MODE */}
-          {mode === "mobile" && (
-            <>
-              <div>
-                <label className="text-sm font-medium text-slate-700">
-                  Mobile Number
-                </label>
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  className="mt-1 w-full rounded-xl bg-white px-4 py-3 border border-slate-300 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-                  placeholder="10-digit number"
-                  value={mobile}
-                  onChange={(e) => {
-                    // keep only digits
-                    const onlyDigits = e.target.value.replace(/\D/g, "");
-                    setMobile(onlyDigits.slice(0, 10));
-                    resetMobileFlow();
-                  }}
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  Demo: OTP is <span className="font-semibold">123456</span>
-                </p>
-              </div>
-
-              {/* Send OTP + OTP input */}
-              <div className="grid grid-cols-1 gap-3">
-                <button
-                  type="button"
-                  onClick={handleSendOtp}
-                  disabled={!canSendOtp}
-                  className={[
-                    "w-full rounded-xl py-3 font-semibold shadow-lg transition",
-                    canSendOtp
-                      ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                      : "bg-slate-200 text-slate-500 cursor-not-allowed",
-                  ].join(" ")}
-                >
-                  {otpSent ? "Resend OTP" : "Send OTP"}
-                </button>
-
-                <div>
-                  <label className="text-sm font-medium text-slate-700">OTP</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    className={[
-                      "mt-1 w-full rounded-xl bg-white px-4 py-3 border shadow-sm outline-none",
-                      otpSent
-                        ? "border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
-                        : "border-slate-200 bg-slate-50 cursor-not-allowed",
-                    ].join(" ")}
-                    placeholder="Enter 6-digit OTP"
-                    value={otp}
-                    disabled={!otpSent}
-                    onChange={(e) => {
-                      const onlyDigits = e.target.value.replace(/\D/g, "");
-                      setOtp(onlyDigits.slice(0, 6));
-                    }}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Submit */}
           <button
             type="submit"
-            className="w-full rounded-xl bg-slate-900 text-white font-semibold py-3 shadow-lg hover:bg-slate-800 hover:-translate-y-0.5 transition-all"
+            disabled={isLoading}
+            className={[
+              "w-full rounded-xl bg-slate-900 text-white font-semibold py-3 shadow-lg transition-all",
+              isLoading 
+                ? "opacity-50 cursor-not-allowed" 
+                : "hover:bg-slate-800 hover:-translate-y-0.5"
+            ].join(" ")}
           >
-            {mode === "mobile" ? "Verify & Login" : "Login"}
+            {isLoading ? "Logging in..." : "Login"}
           </button>
         </form>
 
         {/* hint */}
         <p className="mt-5 text-center text-xs text-slate-500">
-          You can keep both methods now. Later we can connect real API.
+          Demo credentials: admin@gmail.com / admin123
         </p>
       </div>
     </div>

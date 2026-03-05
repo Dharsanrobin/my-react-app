@@ -6,6 +6,8 @@ interface FormData {
   name: string;
   email: string;
   teamName: string;
+  mobile: string;
+  password: string;
 }
 
 type ApiMember = {
@@ -13,9 +15,36 @@ type ApiMember = {
   name: string;
   email: string;
   teamName: string;
+  role?: string;
+  phoneNumber?: string;
 };
 
-const emptyForm: FormData = { id: "", name: "", email: "", teamName: "" };
+const emptyForm: FormData = { 
+  id: "", 
+  name: "", 
+  email: "", 
+  teamName: "",
+  mobile: "",
+  password: ""
+};
+
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return {
+    "accept": "*/*",
+    "Authorization": token ? `Bearer ${token}` : "",
+    "Content-Type": "application/json",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0"
+  };
+};
+
+// Check if user is authenticated
+const isAuthenticated = () => {
+  return !!localStorage.getItem("token");
+};
 
 export default function Members() {
   const navigate = useNavigate();
@@ -23,7 +52,6 @@ export default function Members() {
 
   // Check where the component is accessed from
   const isFromHome = location.state?.from === "home";
-  // const isFromLogin = location.state?.from === "login" || !isFromHome; // Default to login mode if no state
 
   const [formData, setFormData] = useState<FormData>(emptyForm);
   const [users, setUsers] = useState<FormData[]>([]);
@@ -38,6 +66,13 @@ export default function Members() {
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
 
+  // Redirect to login if not authenticated and trying to access edit functions
+  useEffect(() => {
+    if (!isFromHome && !isAuthenticated()) {
+      navigate("/login");
+    }
+  }, [isFromHome, navigate]);
+
   /* ===================== GET API ===================== */
   const fetchMembers = async () => {
     const controller = new AbortController();
@@ -45,22 +80,73 @@ export default function Members() {
       setLoading(true);
       setApiError(null);
 
+      // Add cache-busting parameter to prevent 304 responses
+      const cacheBuster = `?_=${new Date().getTime()}`;
+      
       const res = await fetch(
-        "https://just-encouragement-production-671d.up.railway.app/project/api/members",
-        { method: "GET", signal: controller.signal }
+        `/project/api/members${cacheBuster}`,
+        { 
+          method: "GET", 
+          signal: controller.signal,
+          headers: getAuthHeaders()
+        }
       );
+
+      if (res.status === 304) {
+        console.log("Received 304, forcing re-fetch...");
+        const newCacheBuster = `?_=${new Date().getTime() + 1}`;
+        const retryRes = await fetch(
+          `/project/api/members${newCacheBuster}`,
+          { 
+            method: "GET", 
+            signal: controller.signal,
+            headers: getAuthHeaders()
+          }
+        );
+        
+        if (!retryRes.ok) {
+          throw new Error(`API failed: ${retryRes.status}`);
+        }
+        
+        const data: ApiMember[] = await retryRes.json();
+        console.log("API Response after retry:", data);
+        
+        const mapped: FormData[] = (data || []).map((m) => ({
+          id: String(m.id),
+          name: m.name ?? "",
+          email: m.email ?? "",
+          teamName: m.teamName ?? "",
+          mobile: m.phoneNumber ?? "",
+          password: "",
+        }));
+        
+        setUsers(mapped);
+        return;
+      }
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        if (!isFromHome) {
+          navigate("/login");
+        }
+        throw new Error("Session expired. Please login again.");
+      }
 
       if (!res.ok) {
         throw new Error(`API failed: ${res.status}`);
       }
 
       const data: ApiMember[] = await res.json();
+      console.log("API Response:", data);
 
       const mapped: FormData[] = (data || []).map((m) => ({
         id: String(m.id),
         name: m.name ?? "",
         email: m.email ?? "",
         teamName: m.teamName ?? "",
+        mobile: m.phoneNumber ?? "",
+        password: "",
       }));
 
       setUsers(mapped);
@@ -77,7 +163,6 @@ export default function Members() {
 
   useEffect(() => {
     fetchMembers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ===================== POST API ===================== */
@@ -86,35 +171,42 @@ export default function Members() {
       setLoading(true);
       setApiError(null);
 
+      const apiPayload = {
+        name: payload.name,
+        teamName: payload.teamName,
+        email: payload.email,
+        mobile: payload.mobile,
+        password: payload.password
+      };
+
+      console.log("Creating member with payload:", apiPayload);
+
       const res = await fetch(
-        "https://just-encouragement-production-671d.up.railway.app/project/api/members",
+        `/project/api/members`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
+          headers: getAuthHeaders(),
+          body: JSON.stringify(apiPayload),
         }
       );
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        throw new Error("Session expired. Please login again.");
+      }
 
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`POST failed: ${res.status} ${text}`);
       }
 
-      const created: ApiMember = await res.json();
-
-      setUsers((prev) => [
-        ...prev,
-        {
-          id: String(created.id),
-          name: created.name,
-          email: created.email,
-          teamName: created.teamName,
-        },
-      ]);
-
+      // Force a fresh fetch after successful creation
+      await fetchMembers();
+      
       setFormData(emptyForm);
+      alert("Member created successfully!");
     } catch (err: any) {
       setApiError(err?.message || "Failed to create member");
     } finally {
@@ -124,7 +216,6 @@ export default function Members() {
 
   /* ===================== DELETE API ===================== */
   const deleteUser = async (id: string) => {
-    // Only allow deleting if from Login
     if (isFromHome) return;
     
     try {
@@ -132,31 +223,30 @@ export default function Members() {
       setApiError(null);
 
       const res = await fetch(
-         `https://just-encouragement-production-671d.up.railway.app/project/api/members/${id}?id=${id}`,
+        `/project/api/members/${id}`,
         {
           method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: getAuthHeaders(),
         }
       );
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        throw new Error("Session expired. Please login again.");
+      }
 
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`DELETE failed: ${res.status} ${text}`);
       }
 
-      // If DELETE successful, remove from local state and reorder IDs
-      setUsers((prev) => {
-        const filtered = prev.filter((u) => u.id !== id);
-        const reordered = filtered.map((user, index) => ({
-          ...user,
-          id: String(index + 1)
-        }));
-        return reordered;
-      });
+      // Force a fresh fetch after delete
+      await fetchMembers();
       
       if (editingId === id) cancelEdit();
+      alert("Member deleted successfully!");
       
     } catch (err: any) {
       setApiError(err?.message || "Failed to delete member");
@@ -186,62 +276,43 @@ export default function Members() {
 
   /* ===================== UPDATE API ===================== */
   const updateMember = async (id: string, payload: Omit<FormData, "id">) => {
-    // Only allow editing if from Login
     if (isFromHome) return;
     
     try {
       setLoading(true);
       setApiError(null);
 
-      // Build URL with query parameters exactly like your API pattern
-      const queryParams = new URLSearchParams({
-        id: id,
+      const apiPayload = {
         name: payload.name,
-        email: payload.email,
         teamName: payload.teamName,
-      }).toString();
+        email: payload.email,
+        mobile: payload.mobile,
+        password: payload.password || "password"
+      };
 
-      const url = `https://just-encouragement-production-671d.up.railway.app/project/api/members/${id}?${queryParams}`;
-      
-      console.log("Updating with URL:", url); // For debugging
-
-      const res = await fetch(url, {
-        method: "PUT", // Using PUT method
-        headers: {
-          "Content-Type": "application/json",
-        },
-        // No body since data is in URL query parameters
+      const res = await fetch(`/project/api/members/${id}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(apiPayload),
       });
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        throw new Error("Session expired. Please login again.");
+      }
 
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`UPDATE failed: ${res.status} ${text}`);
       }
 
-      // Try to parse response if JSON, but don't fail if no response body
-      let updatedData = { id, ...payload };
-      try {
-        const responseData = await res.json();
-        updatedData = responseData;
-      } catch {
-        // Use payload data if no JSON response
-      }
-
-      // Update local state with the new values
-      setUsers((prev) =>
-        prev.map((u) => 
-          u.id === id 
-            ? { 
-                id: String(updatedData.id),
-                name: updatedData.name,
-                email: updatedData.email,
-                teamName: updatedData.teamName,
-              } 
-            : u
-        )
-      );
+      // Force a fresh fetch after update
+      await fetchMembers();
 
       cancelEdit();
+      alert("Member updated successfully!");
       
     } catch (err: any) {
       setApiError(err?.message || "Failed to update member");
@@ -256,7 +327,6 @@ export default function Members() {
   };
 
   const startEdit = (user: FormData) => {
-    // Only allow editing if from Login
     if (isFromHome) return;
     setEditingId(user.id);
     setFormData(user);
@@ -270,32 +340,81 @@ export default function Members() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.email || !formData.teamName) {
-      alert("Please fill all fields.");
+    if (!formData.name || !formData.email || !formData.teamName || !formData.mobile || !formData.password) {
+      alert("Please fill all fields (Name, Email, Team, Mobile, Password).");
       return;
     }
 
-    // EDIT with API
+    if (!/^\d{10}$/.test(formData.mobile)) {
+      alert("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+
+    if (!isAuthenticated() && !isFromHome) {
+      navigate("/login");
+      return;
+    }
+    
     if (isEditing) {
       await updateMember(editingId!, {
         name: formData.name,
         email: formData.email,
         teamName: formData.teamName,
+        mobile: formData.mobile,
+        password: formData.password,
       });
       return;
     }
 
-    // CREATE (POST API)
     await createMember({
       name: formData.name,
       email: formData.email,
       teamName: formData.teamName,
+      mobile: formData.mobile,
+      password: formData.password,
     });
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("isAuth");
+    navigate("/login");
+  };
+
+  const handleRefresh = async () => {
+  setLoading(true);
+  try {
+    const cacheBuster = `?_=${new Date().getTime()}`;
+    const res = await fetch(`/project/api/members${cacheBuster}`, {
+      headers: getAuthHeaders()
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      const mapped: FormData[] = (data || []).map((m: any) => ({
+        id: String(m.id),
+        name: m.name ?? "",
+        email: m.email ?? "",
+        teamName: m.teamName ?? "",
+        mobile: m.phoneNumber ?? "",
+        password: "",
+      }));
+      setUsers(mapped);
+      setApiError(null);
+    } else {
+      throw new Error(`Failed to refresh: ${res.status}`);
+    }
+  } catch (err: any) {
+    console.error("Refresh error:", err);
+    setApiError(err?.message || "Failed to refresh");
+  } finally {
+    setLoading(false);
+  }
+};
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6">
 
         {/* Delete Confirmation Modal */}
         {showDeleteModal && userToDelete && (
@@ -313,7 +432,7 @@ export default function Members() {
                   Are you sure you want to delete <span className="font-semibold">{userToDelete.name}</span>?
                 </p>
                 <p className="text-sm text-slate-500 mt-2">
-                  ID: #{userToDelete.id} • Email: {userToDelete.email} • Team: {userToDelete.teamName}
+                  ID: #{userToDelete.id} • Email: {userToDelete.email} • Team: {userToDelete.teamName} • Mobile: {userToDelete.mobile}
                 </p>
                 <p className="text-xs text-rose-600 mt-3">
                   This action cannot be undone.
@@ -352,21 +471,34 @@ export default function Members() {
 
         {/* Top Actions */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <button
-            onClick={() => navigate(-1)}
-            className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-200"
-          >
-            ← Back
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate(-1)}
+              className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-100 focus:outline-none focus:ring-4 focus:ring-slate-200"
+            >
+              ← Back
+            </button>
+            
+            {!isFromHome && isAuthenticated() && (
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm ring-1 ring-rose-200 hover:bg-rose-100 focus:outline-none focus:ring-4 focus:ring-rose-100"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Logout
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-3">
-            {/* Access Mode Badge */}
             <span className={`rounded-full px-3 py-1 text-xs font-medium ${isFromHome ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"}`}>
-              {isFromHome ? "View Mode" : "Edit Mode"}
+              {isFromHome ? "👁️ View Mode" : "✏️ Edit Mode"}
             </span>
 
             <button
-              onClick={fetchMembers}
+              onClick={handleRefresh}
               disabled={loading}
               className={[
                 "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shadow-sm ring-1",
@@ -404,32 +536,20 @@ export default function Members() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-5">
-              <div className="flex flex-wrap items-end gap-4">
-
-                {/* ID Field - Different display for edit vs create */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* ID Field */}
                 <div className="flex flex-col">
-                  <label className="text-sm font-medium text-slate-700">ID</label>
-                  {isEditing ? (
-                    <div className="w-28 rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-slate-900 font-medium shadow-sm">
-                      {formData.id || "Auto-generated"}
-                    </div>
-                  ) : (
-                    <input
-                      type="text"
-                      name="id"
-                      value={formData.id}
-                      onChange={handleChange}
-                      disabled={true}
-                      placeholder="Auto-generated"
-                      className="w-28 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-500 shadow-sm outline-none cursor-not-allowed"
-                    />
-                  )}
-                 
+                  <label className="text-sm font-medium text-slate-700 mb-1">ID</label>
+                  <div className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-slate-500 text-sm shadow-sm">
+                    {isEditing ? formData.id || "Auto" : "Auto-generated"}
+                  </div>
                 </div>
 
                 {/* Name */}
                 <div className="flex flex-col">
-                  <label className="text-sm font-medium text-slate-700">Name</label>
+                  <label className="text-sm font-medium text-slate-700 mb-1">
+                    Name <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
                     name="name"
@@ -437,13 +557,15 @@ export default function Members() {
                     onChange={handleChange}
                     placeholder="Enter name"
                     required
-                    className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
                   />
                 </div>
 
                 {/* Email */}
                 <div className="flex flex-col">
-                  <label className="text-sm font-medium text-slate-700">Email</label>
+                  <label className="text-sm font-medium text-slate-700 mb-1">
+                    Email <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="email"
                     name="email"
@@ -451,52 +573,97 @@ export default function Members() {
                     onChange={handleChange}
                     placeholder="name@example.com"
                     required
-                    className="w-56 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
                   />
                 </div>
 
-                {/* Team */}
+                {/* Team Name */}
                 <div className="flex flex-col">
-                  <label className="text-sm font-medium text-slate-700">Team</label>
+                  <label className="text-sm font-medium text-slate-700 mb-1">
+                    Team <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     type="text"
                     name="teamName"
                     value={formData.teamName}
                     onChange={handleChange}
-                    placeholder="Enter team name"
+                    placeholder="Team name"
                     required
-                    className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
                   />
                 </div>
 
-                {/* Buttons */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className={[
-                      "rounded-xl px-5 py-2 text-sm font-semibold text-white shadow-sm",
-                      isEditing
-                        ? "bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-100"
-                        : "bg-blue-600 hover:bg-blue-700 focus:ring-blue-100",
-                      "focus:outline-none focus:ring-4",
-                      loading && "opacity-50 cursor-not-allowed",
-                    ].join(" ")}
-                  >
-                    {loading ? "Processing..." : (isEditing ? "Update Member" : "Add Member")}
-                  </button>
-
-                  {isEditing && (
-                    <button
-                      type="button"
-                      onClick={cancelEdit}
-                      disabled={loading}
-                      className="rounded-xl border border-slate-200 bg-white px-5 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Cancel
-                    </button>
-                  )}
+                {/* Mobile */}
+                <div className="flex flex-col">
+                  <label className="text-sm font-medium text-slate-700 mb-1">
+                    Mobile <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    name="mobile"
+                    value={formData.mobile}
+                    onChange={handleChange}
+                    placeholder="10-digit mobile"
+                    maxLength={10}
+                    required
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+                  />
                 </div>
+
+                {/* Password */}
+                <div className="flex flex-col">
+                  <label className="text-sm font-medium text-slate-700 mb-1">
+                    Password <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    placeholder="Password"
+                    required={!isEditing}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
+                  />
+                </div>
+              </div>
+
+              {/* Buttons */}
+              <div className="mt-6 flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={[
+                    "px-6 py-2.5 rounded-xl text-sm font-semibold text-white shadow-lg transition-all",
+                    isEditing
+                      ? "bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-100"
+                      : "bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-100",
+                    "focus:outline-none focus:ring-4",
+                    loading && "opacity-50 cursor-not-allowed",
+                  ].join(" ")}
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Processing...
+                    </span>
+                  ) : (
+                    isEditing ? "Update Member" : "Add Member"
+                  )}
+                </button>
+
+                {isEditing && (
+                  <button
+                    type="button"
+                    onClick={cancelEdit}
+                    disabled={loading}
+                    className="px-6 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-100 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -548,6 +715,7 @@ export default function Members() {
                     <th className="py-3 pr-4 font-medium">Name</th>
                     <th className="py-3 pr-4 font-medium">Email</th>
                     <th className="py-3 pr-4 font-medium">Team</th>
+                    <th className="py-3 pr-4 font-medium">Mobile</th>
                     <th className="py-3 pr-0 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -563,10 +731,10 @@ export default function Members() {
                           {u.teamName}
                         </span>
                       </td>
+                      <td className="py-3 pr-4">{u.mobile}</td>
                       <td className="py-3 pr-0">
                         <div className="flex justify-end gap-2">
                           {isFromHome ? (
-                            // Disabled buttons for Home view
                             <>
                               <button
                                 disabled
@@ -582,7 +750,6 @@ export default function Members() {
                               </button>
                             </>
                           ) : (
-                            // Enabled buttons for Login view
                             <>
                               <button
                                 type="button"

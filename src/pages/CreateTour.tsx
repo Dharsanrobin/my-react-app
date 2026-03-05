@@ -36,6 +36,23 @@ interface ApiTournament {
   status: string;
 }
 
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  // Clean the token - remove any whitespace
+  const cleanToken = token?.trim();
+  return {
+    "accept": "*/*",
+    "Authorization": cleanToken ? `Bearer ${cleanToken}` : "",
+    "Content-Type": "application/json",
+  };
+};
+
+// Check if user is authenticated
+const isAuthenticated = () => {
+  return !!localStorage.getItem("token");
+};
+
 // Delete Confirmation Modal Component
 const DeleteConfirmationModal: React.FC<{
   tour: Tour;
@@ -123,171 +140,194 @@ const GeneratedTournamentView: React.FC<{
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
+    console.log('GeneratedTournamentView mounted with tour:', tour);
+    console.log('Tour ID:', tour.id);
     fetchMatches();
   }, [tour.id]);
 
-const fetchMatches = async () => {
-  setLoading(true);
-  setError(null);
-  try {
-    const cleanTourId = tour.id.replace('#', '');
-    console.log('Fetching matches for tournament:', cleanTourId);
-    
-    const response = await fetch(
-      `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/matches`,
-      {
-        headers: {
-          'accept': '*/*'
+  const fetchMatches = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (!tour.id) {
+        setError('Invalid tournament ID');
+        setLoading(false);
+        return;
+      }
+
+      const cleanTourId = tour.id.replace('#', '');
+      const tournamentId = parseInt(cleanTourId);
+      
+      console.log('Fetching matches for tournament ID:', tournamentId);
+      
+      const response = await fetch(
+        `/project/api/tournaments/${tournamentId}/matches`,
+        {
+          headers: getAuthHeaders()
+        }
+      );
+      
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Matches fetched:', data);
+        
+        const matchesArray = Array.isArray(data) ? data : [];
+        setMatches(matchesArray);
+        
+        localStorage.setItem(`matches_${tour.id}`, JSON.stringify(matchesArray));
+      } else {
+        const errorText = await response.text();
+        console.error('Failed to fetch matches:', response.status, errorText);
+        
+        try {
+          const errorData = JSON.parse(errorText);
+          setError(errorData.message || `Failed to load matches (Status: ${response.status})`);
+        } catch {
+          setError(`Failed to load matches (Status: ${response.status})`);
         }
       }
-    );
-    
-    if (response.ok) {
-      const data = await response.json();
-      console.log('Matches fetched:', data);
+    } catch (error) {
+      console.error('Error fetching matches:', error);
+      setError('Network error. Please check your connection.');
       
-      // Ensure we have an array
-      const matchesArray = Array.isArray(data) ? data : [];
-      setMatches(matchesArray);
-      
-      // Also save to localStorage as backup
-      localStorage.setItem(`matches_${tour.id}`, JSON.stringify(matchesArray));
-    } else {
-      const errorText = await response.text();
-      console.error('Failed to fetch matches:', response.status, errorText);
-      
-      // Try to parse error message
-      try {
-        const errorData = JSON.parse(errorText);
-        setError(errorData.message || `Failed to load matches (Status: ${response.status})`);
-      } catch {
-        setError(`Failed to load matches (Status: ${response.status})`);
+      const savedMatches = localStorage.getItem(`matches_${tour.id}`);
+      if (savedMatches) {
+        try {
+          const parsedMatches = JSON.parse(savedMatches);
+          setMatches(parsedMatches);
+          setError(null);
+        } catch (e) {
+          console.error('Error parsing saved matches:', e);
+        }
       }
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    console.error('Error fetching matches:', error);
-    setError('Network error. Please check your connection.');
-    
-    // Fallback to localStorage
-    const savedMatches = localStorage.getItem(`matches_${tour.id}`);
-    if (savedMatches) {
-      try {
-        const parsedMatches = JSON.parse(savedMatches);
-        setMatches(parsedMatches);
-        setError(null); // Clear error if we have local data
-      } catch (e) {
-        console.error('Error parsing saved matches:', e);
-      }
-    }
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const handleAddScore = (match: any) => {
+    console.log('Selected match:', match);
     setSelectedMatch(match);
     setScoreA(match.scoreA?.toString() || '');
     setScoreB(match.scoreB?.toString() || '');
+    setError(null);
+    setSuccessMessage(null);
   };
 
-const handleSubmitScore = async () => {
-  if (!selectedMatch || !scoreA.trim() || !scoreB.trim()) return;
+  const handleSubmitScore = async () => {
+    if (!selectedMatch || !scoreA.trim() || !scoreB.trim()) {
+      setError('Please enter both scores');
+      return;
+    }
 
-  setIsSubmitting(true);
-  setError(null);
-  
-  try {
-    const cleanTourId = tour.id.replace('#', '');
-    const matchId = selectedMatch.matchId;
+    setIsSubmitting(true);
+    setError(null);
+    setSuccessMessage(null);
     
-    const payload = {
-      scoreA: parseInt(scoreA),
-      scoreB: parseInt(scoreB)
-    };
-    
-    console.log('Submitting score:', {
-      url: `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/matches/${matchId}/score`,
-      payload: payload
-    });
+    try {
+      // Get match ID - check different possible field names
+      const matchId = parseInt(selectedMatch.matchId || selectedMatch.id);
+      
+      if (isNaN(matchId)) {
+        setError(`Invalid match ID: ${selectedMatch.matchId || selectedMatch.id}`);
+        setIsSubmitting(false);
+        return;
+      }
 
-    const response = await fetch(
-      `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/matches/${matchId}/score`,
-      {
+      const payload = {
+        scoreA: parseInt(scoreA),
+        scoreB: parseInt(scoreB)
+      };
+      
+      // FIX: Remove tournament ID from URL - API doesn't need it for score updates
+      const url = `/project/api/tournaments/matches/${matchId}/score`;
+      
+      console.log('Final URL:', url);
+      console.log('Payload:', payload);
+
+      const response = await fetch(url, {
         method: 'PUT',
-        headers: {
-          'accept': '*/*',
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload),
+      });
+
+      console.log('Response status:', response.status);
+      
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
       }
-    );
-
-    console.log('Response status:', response.status);
-    
-    // Try to get response body for error details
-    let responseData;
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      responseData = await response.json();
-    } else {
-      responseData = await response.text();
-    }
-    
-    console.log('Response data:', responseData);
-
-    if (response.ok) {
-      // Success - update local state
-      const updatedMatches = matches.map(m =>
-        m.matchId === selectedMatch.matchId
-          ? {
-              ...m,
-              scoreA: parseInt(scoreA),
-              scoreB: parseInt(scoreB),
-              status: 'COMPLETED'
-            }
-          : m
-      );
       
-      setMatches(updatedMatches);
-      localStorage.setItem(`matches_${tour.id}`, JSON.stringify(updatedMatches));
-      
-      // Close modal and reset
-      setSelectedMatch(null);
-      setScoreA('');
-      setScoreB('');
-      setError(null);
-      
-      console.log('Score updated successfully!');
-      
-      // Refresh matches to get latest data
-      fetchMatches();
-    } else {
-      // Handle specific error status codes
-      if (response.status === 404) {
-        setError('Match not found. Please refresh and try again.');
-      } else if (response.status === 400) {
-        setError('Invalid score values. Please check and try again.');
-      } else if (response.status === 500) {
-        setError('Server error. Please try again later.');
+      if (response.ok) {
+        const responseText = await response.text();
+        console.log('Response:', responseText);
+        
+        // Update local state
+        const updatedMatches = matches.map(m =>
+          (m.matchId === selectedMatch.matchId || m.id === selectedMatch.id)
+            ? {
+                ...m,
+                scoreA: parseInt(scoreA),
+                scoreB: parseInt(scoreB),
+                status: 'COMPLETED'
+              }
+            : m
+        );
+        
+        setMatches(updatedMatches);
+        localStorage.setItem(`matches_${tour.id}`, JSON.stringify(updatedMatches));
+        
+        setSuccessMessage('Score updated successfully!');
+        setSelectedMatch(null);
+        setScoreA('');
+        setScoreB('');
+        
+        // Refresh matches from server
+        fetchMatches();
       } else {
-        setError(`Failed to update score (Status: ${response.status}). Please try again.`);
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        
+        if (response.status === 403) {
+          setError('Permission denied. You may not have rights to update this score.');
+        } else if (response.status === 404) {
+          setError('Match not found. Please refresh and try again.');
+        } else if (response.status === 400) {
+          setError('Invalid score values. Please check and try again.');
+        } else if (response.status === 500) {
+          setError('Server error. Please try again later.');
+        } else {
+          setError(`Failed to update score (Status: ${response.status}). Please try again.`);
+        }
       }
+      
+    } catch (error) {
+      console.error('Error updating score:', error);
+      setError('Network error. Please check your connection and try again.');
+    } finally {
+      setIsSubmitting(false);
     }
-    
-  } catch (error) {
-    console.error('Error updating score:', error);
-    setError('Network error. Please check your connection and try again.');
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+  };
 
   const handleCloseModal = () => {
     setSelectedMatch(null);
     setScoreA('');
     setScoreB('');
+    setError(null);
+    setSuccessMessage(null);
   };
 
   if (!tour.selectedMembers || tour.selectedMembers.length < 2) {
@@ -307,9 +347,8 @@ const handleSubmitScore = async () => {
     );
   }
 
-  // Separate matches by completion status
-  const matchesWithScore = matches.filter(m => m.scoreA > 0 || m.scoreB > 0);
-  const matchesWithoutScore = matches.filter(m => m.scoreA === 0 && m.scoreB === 0);
+  const matchesWithScore = matches.filter((m: any) => (m.scoreA > 0 || m.scoreB > 0));
+  const matchesWithoutScore = matches.filter((m: any) => (m.scoreA === 0 && m.scoreB === 0));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -369,16 +408,15 @@ const handleSubmitScore = async () => {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Pending Matches Section */}
               {matchesWithoutScore.length > 0 && (
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
                     Pending Matches
                   </h4>
                   <div className="grid gap-4">
-                    {matchesWithoutScore.map((match, index) => (
+                    {matchesWithoutScore.map((match: any, index: number) => (
                       <div
-                        key={match.matchId}
+                        key={match.matchId || match.id}
                         className="flex flex-col p-4 rounded-xl border border-slate-200 bg-white hover:border-blue-200 transition-colors"
                       >
                         <div className="flex items-center justify-between">
@@ -414,16 +452,15 @@ const handleSubmitScore = async () => {
                 </div>
               )}
 
-              {/* Completed Matches Section */}
               {matchesWithScore.length > 0 && (
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
                     Completed Matches
                   </h4>
                   <div className="grid gap-4">
-                    {matchesWithScore.map((match, index) => (
+                    {matchesWithScore.map((match: any, index: number) => (
                       <div
-                        key={match.matchId}
+                        key={match.matchId || match.id}
                         className="flex flex-col p-4 rounded-xl border border-green-200 bg-green-50"
                       >
                         <div className="flex items-center justify-between">
@@ -496,113 +533,115 @@ const handleSubmitScore = async () => {
       </div>
 
       {/* Score Input Modal */}
-     {/* Score Input Modal */}
-{selectedMatch && (
-  <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
-    <div className="bg-white rounded-2xl max-w-md w-full p-6">
-      <h3 className="text-xl font-semibold text-slate-900 mb-4">
-        {selectedMatch.scoreA > 0 || selectedMatch.scoreB > 0 ? 'Edit Score' : 'Add Score'}
-      </h3>
-      
-      {/* Error message */}
-      {error && (
-        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl">
-          <div className="flex items-start gap-2">
-            <svg className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div className="flex-1">
-              <p className="text-sm text-rose-600">{error}</p>
+      {selectedMatch && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6">
+            <h3 className="text-xl font-semibold text-slate-900 mb-4">
+              {selectedMatch.scoreA > 0 || selectedMatch.scoreB > 0 ? 'Edit Score' : 'Add Score'}
+            </h3>
+            
+            {error && (
+              <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                <div className="flex items-start gap-2">
+                  <svg className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm text-rose-600">{error}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-xl">
+                <div className="flex items-start gap-2">
+                  <svg className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-sm text-green-600">{successMessage}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-center flex-1">
+                  <p className="font-semibold text-slate-900">{selectedMatch.teamAName}</p>
+                </div>
+                <div className="px-4">
+                  <span className="text-sm font-semibold text-slate-400">VS</span>
+                </div>
+                <div className="text-center flex-1">
+                  <p className="font-semibold text-slate-900">{selectedMatch.teamBName}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    {selectedMatch.teamAName}'s Score
+                  </label>
+                  <input
+                    type="number"
+                    value={scoreA}
+                    onChange={(e) => setScoreA(e.target.value)}
+                    min="0"
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg font-semibold focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                    placeholder="0"
+                    autoFocus
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className="text-sm font-semibold text-slate-400">-</div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    {selectedMatch.teamBName}'s Score
+                  </label>
+                  <input
+                    type="number"
+                    value={scoreB}
+                    onChange={(e) => setScoreB(e.target.value)}
+                    min="0"
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg font-semibold focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                    placeholder="0"
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
               <button
-                onClick={() => {
-                  setError(null);
-                  handleSubmitScore();
-                }}
-                className="mt-2 text-xs font-semibold text-rose-700 hover:text-rose-800"
+                onClick={handleCloseModal}
+                className="flex-1 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-semibold"
+                disabled={isSubmitting}
               >
-                Retry
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitScore}
+                disabled={!scoreA.trim() || !scoreB.trim() || isSubmitting}
+                className="flex-1 px-4 py-2 rounded-xl bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-semibold"
+              >
+                {isSubmitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Saving...
+                  </span>
+                ) : (
+                  'Save Score'
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
-      
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-center flex-1">
-            <p className="font-semibold text-slate-900">{selectedMatch.teamAName}</p>
-          </div>
-          <div className="px-4">
-            <span className="text-sm font-semibold text-slate-400">VS</span>
-          </div>
-          <div className="text-center flex-1">
-            <p className="font-semibold text-slate-900">{selectedMatch.teamBName}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="flex-1">
-            <label className="block text-xs font-medium text-slate-500 mb-1">
-              {selectedMatch.teamAName}'s Score
-            </label>
-            <input
-              type="number"
-              value={scoreA}
-              onChange={(e) => setScoreA(e.target.value)}
-              min="0"
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg font-semibold focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
-              placeholder="0"
-              autoFocus
-              disabled={isSubmitting}
-            />
-          </div>
-          <div className="text-sm font-semibold text-slate-400">-</div>
-          <div className="flex-1">
-            <label className="block text-xs font-medium text-slate-500 mb-1">
-              {selectedMatch.teamBName}'s Score
-            </label>
-            <input
-              type="number"
-              value={scoreB}
-              onChange={(e) => setScoreB(e.target.value)}
-              min="0"
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg font-semibold focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100"
-              placeholder="0"
-              disabled={isSubmitting}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="flex gap-2">
-        <button
-          onClick={handleCloseModal}
-          className="flex-1 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 font-semibold"
-          disabled={isSubmitting}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSubmitScore}
-          disabled={!scoreA.trim() || !scoreB.trim() || isSubmitting}
-          className="flex-1 px-4 py-2 rounded-xl bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 font-semibold"
-        >
-          {isSubmitting ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Saving...
-            </span>
-          ) : (
-            'Save Score'
-          )}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
     </div>
   );
 };
@@ -691,21 +730,27 @@ const MemberSelectionModal: React.FC<{
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectAll, setSelectAll] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchMembers = async () => {
       try {
         setLoading(true);
         const res = await fetch(
-          "https://just-encouragement-production-671d.up.railway.app/project/api/members",
+          "/project/api/members",
           {
             method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
+            headers: getAuthHeaders(),
           }
         );
+        
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("isAuth");
+          navigate("/login");
+          return;
+        }
+        
         if (res.ok) {
           const data = await res.json();
           setMembers(data);
@@ -718,7 +763,7 @@ const MemberSelectionModal: React.FC<{
     };
 
     fetchMembers();
-  }, []);
+  }, [navigate]);
 
   const toggleMember = (member: Member) => {
     setSelectedMembers(prev => {
@@ -953,6 +998,13 @@ const CreateTour: React.FC = () => {
   const [tourToGenerate, setTourToGenerate] = useState<Tour | null>(null);
   const [viewingTour, setViewingTour] = useState<Tour | null>(null);
 
+  // Check authentication on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate("/login");
+    }
+  }, [navigate]);
+
   const mapApiStatus = (apiStatus: string): Tour['status'] => {
     switch (apiStatus?.toUpperCase()) {
       case 'ACTIVE':
@@ -981,15 +1033,19 @@ const CreateTour: React.FC = () => {
         }
         
         const response = await fetch(
-          "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/tournamentTeams",
+          "/project/api/tournaments",
           {
             method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
+            headers: getAuthHeaders(),
           }
         );
+        
+        if (response.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("isAuth");
+          navigate("/login");
+          return;
+        }
         
         if (response.ok) {
           const apiTours: ApiTournament[] = await response.json();
@@ -1050,7 +1106,7 @@ const CreateTour: React.FC = () => {
     };
 
     fetchTours();
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (tours.length > 0) {
@@ -1087,27 +1143,36 @@ const CreateTour: React.FC = () => {
       const tourData = {
         name: tourName.trim(),
         startDate: today,
-        endDate: today,
-        status: 'UPCOMING'
+        endDate: today
       };
 
+      console.log('Creating tournament with data:', tourData);
+
       const response = await fetch(
-        "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments",
+        "/project/api/tournaments",
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(tourData),
         }
       );
 
+      console.log('Response status:', response.status);
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        throw new Error("Session expired. Please login again.");
+      }
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
       const result = await response.json();
+      console.log('Tournament created:', result);
 
       const newTour: Tour = {
         id: result.id?.toString() || Date.now().toString(),
@@ -1127,7 +1192,7 @@ const CreateTour: React.FC = () => {
 
     } catch (err: any) {
       console.error('Error creating tour:', err);
-      setApiError('Unable to connect to server. Saving locally only.');
+      setApiError(err?.message || 'Unable to create tournament. Please try again.');
       
       const offlineTour: Tour = {
         id: Date.now().toString(),
@@ -1143,6 +1208,7 @@ const CreateTour: React.FC = () => {
       const updatedTours = [offlineTour, ...tours];
       setTours(updatedTours);
       setTourName('');
+      setApiError('Saved locally only. Server connection failed.');
     } finally {
       setIsCreating(false);
     }
@@ -1155,36 +1221,31 @@ const CreateTour: React.FC = () => {
 
     try {
       const cleanTourId = id.replace('#', '');
+      const tournamentId = parseInt(cleanTourId);
       
-      console.log(`Deleting tournament with ID: ${cleanTourId}`);
+      console.log(`Deleting tournament with ID: ${tournamentId}`);
 
       const response = await fetch(
-        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}?id=${cleanTourId}`,
+        `/project/api/tournaments/${tournamentId}`,
         {
           method: 'DELETE',
-          headers: {
-            'accept': '*/*',
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
         }
       );
 
       console.log('Delete response status:', response.status);
 
-      if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
+      if (!response.ok && response.status !== 204) {
         const errorText = await response.text();
         console.error('Error response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      let result;
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        result = await response.json();
-        console.log('Delete API Response:', result);
-      } else {
-        result = await response.text();
-        console.log('Delete API Response:', result);
       }
 
       const updatedTours = tours.filter(t => t.id !== id);
@@ -1241,46 +1302,40 @@ const CreateTour: React.FC = () => {
     
     try {
       const cleanTourId = id.replace('#', '');
+      const tournamentId = parseInt(cleanTourId);
       
-      console.log(`Updating tournament ${cleanTourId} with name: ${editName.trim()}`);
+      console.log(`Updating tournament ${tournamentId} with name: ${editName.trim()}`);
 
       const currentTour = tours.find(t => t.id === id);
       
       const updateData = {
         name: editName.trim(),
-        ...(currentTour?.createdAt && { startDate: currentTour.createdAt.split('T')[0] }),
-        ...(currentTour?.createdAt && { endDate: currentTour.createdAt.split('T')[0] }),
-        status: currentTour?.status?.toUpperCase() || 'UPCOMING'
+        startDate: currentTour?.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
+        endDate: currentTour?.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0]
       };
 
       const response = await fetch(
-        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}?id=${cleanTourId}&name=${encodeURIComponent(editName.trim())}`,
+        `/project/api/tournaments/${tournamentId}`,
         {
           method: 'PUT',
-          headers: {
-            'accept': '*/*',
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(updateData),
         }
       );
 
       console.log('Update response status:', response.status);
 
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Error response:', errorText);
         throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      let result;
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        result = await response.json();
-        console.log('Update API Response:', result);
-      } else {
-        result = await response.text();
-        console.log('Update API Response:', result);
       }
 
       const updatedTours = tours.map(t =>
@@ -1325,7 +1380,8 @@ const CreateTour: React.FC = () => {
       setIsAddingMembers(true);
       
       const cleanTourId = tourId.replace('#', '');
-      const teamIds = selectedMembers.map(member => member.id);
+      const tournamentId = parseInt(cleanTourId);
+      const teamIds = selectedMembers.map(member => parseInt(member.id));
       
       if (teamIds.length === 0) {
         setApiError('No team IDs found for selected members');
@@ -1337,46 +1393,28 @@ const CreateTour: React.FC = () => {
         teamIds: teamIds
       };
 
+      console.log('Adding members to tournament:', requestBody);
+
       const response = await fetch(
-        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/teams`,
+        `/project/api/tournaments/${tournamentId}/teams`,
         {
           method: 'POST',
-          headers: {
-            'accept': '*/*',
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(requestBody),
         }
       );
 
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Error response:', errorText);
-        
-        if (teamIds.every(id => !isNaN(Number(id)))) {
-          console.log('Retrying with numeric IDs...');
-          const numericBody = {
-            teamIds: teamIds.map(id => Number(id))
-          };
-          
-          const retryResponse = await fetch(
-            `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/teams`,
-            {
-              method: 'POST',
-              headers: {
-                'accept': '*/*',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(numericBody),
-            }
-          );
-          
-          if (!retryResponse.ok) {
-            throw new Error(`HTTP error! status: ${retryResponse.status}`);
-          }
-        } else {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const updatedTours = tours.map(t =>
@@ -1427,20 +1465,28 @@ const CreateTour: React.FC = () => {
     
     try {
       const cleanTourId = tourToGenerate.id.replace('#', '');
+      const tournamentId = parseInt(cleanTourId);
       
+      console.log(`Generating matches for tournament: ${tournamentId}`);
+
       const response = await fetch(
-        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanTourId}/generate-matches`,
+        `/project/api/tournaments/${tournamentId}/generate-matches`,
         {
           method: 'POST',
-          headers: {
-            'accept': '*/*',
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
         }
       );
 
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
       const matches = generateMatches(tourToGenerate.selectedMembers || [], tourToGenerate.id);
@@ -1499,6 +1545,8 @@ const CreateTour: React.FC = () => {
 
   const openViewTournament = (tour: Tour, e: React.MouseEvent) => {
     e.stopPropagation();
+    console.log('Opening tournament view with tour:', tour);
+    console.log('Tour ID:', tour.id);
     setViewingTour(tour);
   };
 

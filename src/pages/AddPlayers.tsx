@@ -27,6 +27,23 @@ const emptyPlayer: PlayerData = {
   playerImage: null,
 };
 
+// Helper function to get auth headers (same as CreateTour)
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  // Clean the token - remove any whitespace
+  const cleanToken = token?.trim();
+  return {
+    "accept": "*/*",
+    "Authorization": cleanToken ? `Bearer ${cleanToken}` : "",
+    "Content-Type": "application/json",
+  };
+};
+
+// Check if user is authenticated
+const isAuthenticated = () => {
+  return !!localStorage.getItem("token");
+};
+
 // Modal Component for Full Image View
 const ImageModal: React.FC<{
   imageUrl: string | null;
@@ -122,6 +139,7 @@ const ImageUploadModal: React.FC<{
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -150,58 +168,68 @@ const ImageUploadModal: React.FC<{
   };
 
   const handleUpload = async () => {
-  if (!selectedFile) {
-    setUploadError("Please select an image first");
-    return;
-  }
+    if (!selectedFile) {
+      setUploadError("Please select an image first");
+      return;
+    }
 
-  try {
-    setIsUploading(true);
-    setUploadError(null);
+    try {
+      setIsUploading(true);
+      setUploadError(null);
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
+      const formData = new FormData();
+      formData.append("file", selectedFile);
 
-    console.log("Uploading for player ID:", playerId);
-    console.log("File name:", selectedFile.name);
+      console.log("Uploading for player ID:", playerId);
+      console.log("File name:", selectedFile.name);
 
-    const res = await fetch(
-      `https://just-encouragement-production-671d.up.railway.app/project/api/players/image/${playerId}`,
-      {
-        method: "POST",
-        body: formData,
+      const res = await fetch(
+        `/project/api/players/image/${playerId}`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": getAuthHeaders().Authorization,
+          },
+          body: formData,
+        }
+      );
+
+      console.log("Response status:", res.status);
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
       }
-    );
 
-    console.log("Response status:", res.status);
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Upload failed: ${res.status} - ${errorText}`);
+      }
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Upload failed: ${res.status} - ${errorText}`);
+      // Check content type to determine response format
+      const contentType = res.headers.get("content-type");
+      
+      if (contentType && contentType.includes("application/json")) {
+        // If JSON, parse it
+        const data = await res.json();
+        onUploadSuccess(data.imageUrl || data.url || data.fileUrl);
+      } else {
+        // If not JSON (like image binary), create a blob URL
+        const blob = await res.blob();
+        const imageUrl = URL.createObjectURL(blob);
+        onUploadSuccess(imageUrl);
+      }
+      
+      onClose();
+    } catch (err: any) {
+      setUploadError(err?.message || "Failed to upload image");
+      console.error("Error uploading image:", err);
+    } finally {
+      setIsUploading(false);
     }
-
-    // Check content type to determine response format
-    const contentType = res.headers.get("content-type");
-    
-    if (contentType && contentType.includes("application/json")) {
-      // If JSON, parse it
-      const data = await res.json();
-      onUploadSuccess(data.imageUrl || data.url || data.fileUrl);
-    } else {
-      // If not JSON (like image binary), create a blob URL
-      const blob = await res.blob();
-      const imageUrl = URL.createObjectURL(blob);
-      onUploadSuccess(imageUrl);
-    }
-    
-    onClose();
-  } catch (err: any) {
-    setUploadError(err?.message || "Failed to upload image");
-    console.error("Error uploading image:", err);
-  } finally {
-    setIsUploading(false);
-  }
-};
+  };
 
   // Handle Escape key
   useEffect(() => {
@@ -347,11 +375,30 @@ export default function AddPlayers() {
   // API states
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Check authentication on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate("/login");
+    }
+  }, [navigate]);
 
   // Check where the component is accessed from
   const isFromHome = location.state?.from === "home";
 
   const isEditing = useMemo(() => editingId !== null, [editingId]);
+
+  // Clear messages after 3 seconds
+  useEffect(() => {
+    if (apiError || successMessage) {
+      const timer = setTimeout(() => {
+        setApiError(null);
+        setSuccessMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [apiError, successMessage]);
 
   /* ===================== GET API ===================== */
   const fetchPlayers = async () => {
@@ -360,17 +407,23 @@ export default function AddPlayers() {
       setApiError(null);
 
       const res = await fetch(
-        "https://just-encouragement-production-671d.up.railway.app/project/api/players",
+        "/project/api/players",
         {
           method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: getAuthHeaders(),
         }
       );
 
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error(`API failed: ${res.status}`);
+        const errorText = await res.text();
+        throw new Error(`API failed: ${res.status} - ${errorText}`);
       }
 
       const data: ApiPlayer[] = await res.json();
@@ -385,6 +438,7 @@ export default function AddPlayers() {
       }));
 
       setPlayers(mappedPlayers);
+      setSuccessMessage("Players loaded successfully!");
       
       // Also save to localStorage as backup
       localStorage.setItem("players", JSON.stringify(mappedPlayers));
@@ -398,6 +452,7 @@ export default function AddPlayers() {
       if (savedPlayers) {
         try {
           setPlayers(JSON.parse(savedPlayers));
+          setApiError("Using cached data - API connection failed");
         } catch (error) {
           console.error("Error loading players from localStorage:", error);
         }
@@ -422,15 +477,20 @@ export default function AddPlayers() {
       };
 
       const res = await fetch(
-        "https://just-encouragement-production-671d.up.railway.app/project/api/players",
+        "/project/api/players",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify(apiPlayer),
         }
       );
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
 
       if (!res.ok) {
         const errorData = await res.text();
@@ -455,12 +515,114 @@ export default function AddPlayers() {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      
+      setSuccessMessage("Player created successfully!");
 
       return newPlayer;
     } catch (err: any) {
       setApiError(err?.message || "Failed to create player");
       console.error("Error creating player:", err);
       throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ===================== PUT API ===================== */
+  const updatePlayer = async (id: string, playerData: PlayerData) => {
+    try {
+      setLoading(true);
+      setApiError(null);
+
+      const apiPlayer = {
+        name: playerData.playerName,
+        position: playerData.playerPosition,
+        basePrice: 1000000,
+      };
+
+      const res = await fetch(
+        `/project/api/players/${id}`,
+        {
+          method: "PUT",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(apiPlayer),
+        }
+      );
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
+      if (!res.ok) {
+        const errorData = await res.text();
+        throw new Error(`API failed: ${res.status} - ${errorData}`);
+      }
+
+      const updatedPlayer: ApiPlayer = await res.json();
+      
+      setPlayers(prev =>
+        prev.map(p =>
+          p.id === id
+            ? {
+                ...p,
+                playerName: updatedPlayer.name,
+                playerPosition: updatedPlayer.position,
+                playerCountry: playerData.playerCountry,
+              }
+            : p
+        )
+      );
+      
+      setSuccessMessage("Player updated successfully!");
+      cancelEdit();
+
+      return updatedPlayer;
+    } catch (err: any) {
+      setApiError(err?.message || "Failed to update player");
+      console.error("Error updating player:", err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* ===================== DELETE API ===================== */
+  const deletePlayer = async (id: string) => {
+    try {
+      setLoading(true);
+      setApiError(null);
+
+      const res = await fetch(
+        `/project/api/players/${id}`,
+        {
+          method: "DELETE",
+          headers: getAuthHeaders(),
+        }
+      );
+
+      if (res.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
+      if (!res.ok) {
+        const errorData = await res.text();
+        throw new Error(`API failed: ${res.status} - ${errorData}`);
+      }
+
+      setPlayers(prev => prev.filter(p => p.id !== id));
+      if (editingId === id) cancelEdit();
+      
+      setSuccessMessage("Player deleted successfully!");
+      
+    } catch (err: any) {
+      setApiError(err?.message || "Failed to delete player");
+      console.error("Error deleting player:", err);
     } finally {
       setLoading(false);
     }
@@ -498,13 +660,6 @@ export default function AddPlayers() {
     setFormData(emptyPlayer);
   };
 
-  const deletePlayer = (id: string) => {
-    // Only allow deleting if from Login
-    if (isFromHome) return;
-    setPlayers((prev) => prev.filter((p) => p.id !== id));
-    if (editingId === id) cancelEdit();
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -519,24 +674,14 @@ export default function AddPlayers() {
 
     try {
       if (isEditing) {
-        // For now, keep local update for edit
-        setPlayers((prev) =>
-          prev.map((p) => (p.id === editingId ? { ...formData } : p))
-        );
-        cancelEdit();
+        // Update via API
+        await updatePlayer(editingId!, formData);
       } else {
-        // Check if ID exists locally first (optional)
-        const exists = players.some((p) => p.id === formData.id);
-        if (exists && formData.id) {
-          alert("This ID already exists. Use another ID or leave ID field empty.");
-          return;
-        }
-
         // Create via API
         await createPlayer(formData);
       }
     } catch (error) {
-      // Error already handled in createPlayer
+      // Error already handled in API functions
     }
   };
 
@@ -547,6 +692,7 @@ export default function AddPlayers() {
         p.id === playerId ? { ...p, playerImage: imageUrl } : p
       )
     );
+    setSuccessMessage("Image uploaded successfully!");
   };
 
   // Open image in modal
@@ -652,6 +798,18 @@ export default function AddPlayers() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 {apiError}
+              </div>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                {successMessage}
               </div>
             </div>
           )}

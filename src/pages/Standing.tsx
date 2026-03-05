@@ -34,6 +34,21 @@ interface TeamStanding {
   standing: number;
 }
 
+// API Standing type (based on the actual API response)
+interface ApiStandingResponse {
+  id: number;
+  name: string;
+  teamName: string;
+  played: number;
+  win: number;
+  loss: number;
+  draw: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+  points: number;
+}
+
 interface Tournament {
   id: string;
   tourName: string;
@@ -41,6 +56,22 @@ interface Tournament {
   status: 'active' | 'completed' | 'upcoming';
   selectedMembers?: Team[];
 }
+
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  const cleanToken = token?.trim();
+  return {
+    "accept": "*/*",
+    "Authorization": cleanToken ? `Bearer ${cleanToken}` : "",
+    "Content-Type": "application/json",
+  };
+};
+
+// Check if user is authenticated
+const isAuthenticated = () => {
+  return !!localStorage.getItem("token");
+};
 
 const Standing: React.FC = () => {
   const navigate = useNavigate();
@@ -53,21 +84,45 @@ const Standing: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(tournamentId || '');
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Check authentication on mount
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate("/login");
+    }
+  }, [navigate]);
+
+  // Clear messages after 3 seconds
+  useEffect(() => {
+    if (apiError || successMessage) {
+      const timer = setTimeout(() => {
+        setApiError(null);
+        setSuccessMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [apiError, successMessage]);
 
   // Fetch all tournaments
   useEffect(() => {
     const fetchTournaments = async () => {
       try {
         const response = await fetch(
-          "https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/tournamentTeams",
+          "/project/api/tournaments",
           {
             method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json',
-            },
+            headers: getAuthHeaders(),
           }
         );
+
+        if (response.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("isAuth");
+          navigate("/login");
+          return;
+        }
 
         if (response.ok) {
           const data = await response.json();
@@ -87,13 +142,13 @@ const Standing: React.FC = () => {
     };
 
     fetchTournaments();
-  }, []);
+  }, [navigate]);
 
-  // Fetch tournament details and matches when tournament is selected
+  // Fetch tournament details and standings when tournament is selected
   useEffect(() => {
     if (selectedTournamentId) {
       fetchTournamentDetails(selectedTournamentId);
-      fetchTournamentMatches(selectedTournamentId);
+      fetchTournamentStandings(selectedTournamentId);
     } else {
       setSelectedTournament(null);
       setMatches([]);
@@ -101,29 +156,43 @@ const Standing: React.FC = () => {
     }
   }, [selectedTournamentId]);
 
-  // Fetch tournament details including members
+  // Fetch tournament details including members - UPDATED to handle 403 gracefully
   const fetchTournamentDetails = async (id: string) => {
     try {
       const cleanId = id.replace('#', '');
       
-      // First try to get tournament teams
-      const response = await fetch(
-        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanId}/teams`,
-        {
-          method: 'GET',
-          headers: {
-            'accept': '*/*',
-          },
-        }
-      );
-
-      let members: Team[] = [];
-      if (response.ok) {
-        members = await response.json();
-      }
-
-      // Get tournament basic info
+      // Get tournament basic info first
       const tournamentInfo = tournaments.find(t => t.id === id);
+      
+      // Try to get tournament teams, but don't show error if it fails
+      let members: Team[] = [];
+      try {
+        const response = await fetch(
+          `/project/api/tournaments/${cleanId}/teams`,
+          {
+            method: 'GET',
+            headers: getAuthHeaders(),
+          }
+        );
+
+        if (response.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("isAuth");
+          navigate("/login");
+          return;
+        }
+
+        if (response.ok) {
+          members = await response.json();
+          console.log('Tournament members loaded:', members);
+        } else if (response.status === 403) {
+          // Silently ignore 403 - we don't need teams for standings
+          console.log('Teams API returned 403 - this is expected, standings will still work');
+        }
+      } catch (error) {
+        // Silently ignore team fetch errors
+        console.log('Could not fetch teams, but standings will still work');
+      }
       
       setSelectedTournament({
         id,
@@ -134,12 +203,76 @@ const Standing: React.FC = () => {
       });
 
     } catch (error) {
-      console.error('Error fetching tournament details:', error);
-      setError('Failed to load tournament details');
+      console.error('Error in tournament details:', error);
+      // Don't set error state for this - standings still work
     }
   };
 
-  // Fetch matches for the tournament
+  // Fetch standings directly from the standings API
+  const fetchTournamentStandings = async (id: string) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const cleanId = id.replace('#', '');
+      
+      const response = await fetch(
+        `/project/api/tournaments/${cleanId}/standings`,
+        {
+          headers: getAuthHeaders()
+        }
+      );
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
+
+      if (response.ok) {
+        const data: ApiStandingResponse[] = await response.json();
+        console.log('Raw standings data:', data);
+        
+        // Map API standings to your component's format
+        const mappedStandings: TeamStanding[] = data.map((standing, index) => {
+          // Calculate win percentage
+          const winPercentage = standing.played > 0 
+            ? (standing.win / standing.played) * 100 
+            : 0;
+            
+          return {
+            teamId: standing.id.toString(),
+            teamName: standing.teamName || standing.name, // Use teamName if available, fallback to name
+            matchesPlayed: standing.played || 0,
+            wins: standing.win || 0,
+            losses: standing.loss || 0,
+            draws: standing.draw || 0,
+            pointsFor: standing.goalsFor || 0,
+            pointsAgainst: standing.goalsAgainst || 0,
+            pointDifference: standing.goalDifference || 0,
+            winPercentage: winPercentage,
+            standing: index + 1 // Use index for ranking since API doesn't provide it
+          };
+        });
+
+        console.log('Mapped standings:', mappedStandings);
+        setStandings(mappedStandings);
+        setSuccessMessage('Standings loaded successfully!');
+      } else {
+        const errorText = await response.text();
+        setError(`Failed to load standings: ${response.status}`);
+        console.error('Error response:', errorText);
+      }
+    } catch (error) {
+      console.error('Error fetching standings:', error);
+      setError('Network error. Please check your connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Keep the old method as fallback
   const fetchTournamentMatches = async (id: string) => {
     setLoading(true);
     setError(null);
@@ -148,20 +281,25 @@ const Standing: React.FC = () => {
       const cleanId = id.replace('#', '');
       
       const response = await fetch(
-        `https://just-encouragement-production-671d.up.railway.app/project/api/tournaments/${cleanId}/matches`,
+        `/project/api/tournaments/${cleanId}/matches`,
         {
-          headers: {
-            'accept': '*/*'
-          }
+          headers: getAuthHeaders()
         }
       );
+
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("isAuth");
+        navigate("/login");
+        return;
+      }
 
       if (response.ok) {
         const data = await response.json();
         const matchesArray = Array.isArray(data) ? data : [];
         setMatches(matchesArray);
         
-        // Calculate standings from matches
+        // Calculate standings from matches (fallback)
         calculateStandings(matchesArray);
       } else {
         setError('Failed to load matches');
@@ -174,7 +312,7 @@ const Standing: React.FC = () => {
     }
   };
 
-  // Calculate standings from matches
+  // Calculate standings from matches (fallback method)
   const calculateStandings = (matchesData: Match[]) => {
     if (!selectedTournament?.selectedMembers) return;
 
@@ -270,9 +408,10 @@ const Standing: React.FC = () => {
     }
   };
 
+  // Updated: Only set the selected ID, don't navigate
   const handleTournamentSelect = (id: string) => {
     setSelectedTournamentId(id);
-    navigate(`/standing/${id}`);
+    // No navigation - just update state
   };
 
   const getWinRateColor = (percentage: number) => {
@@ -326,11 +465,47 @@ const Standing: React.FC = () => {
           <div className="w-20"></div>
         </div>
 
+        {/* Error Message - Only show for critical errors, not teams 403 */}
+        {apiError && (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              {apiError}
+            </div>
+          </div>
+        )}
+
+        {/* Success Message */}
+        {successMessage && (
+          <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              {successMessage}
+            </div>
+          </div>
+        )}
+
         {/* Tournament Selector */}
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            Select Tournament
-          </label>
+          <div className="flex items-center justify-between mb-4">
+            <label className="block text-sm font-medium text-slate-700">
+              Select Tournament
+            </label>
+            <button
+              onClick={() => selectedTournamentId && fetchTournamentStandings(selectedTournamentId)}
+              disabled={!selectedTournamentId || loading}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh
+            </button>
+          </div>
           <select
             value={selectedTournamentId}
             onChange={(e) => handleTournamentSelect(e.target.value)}
@@ -345,7 +520,7 @@ const Standing: React.FC = () => {
           </select>
         </div>
 
-        {/* Tournament Info & Standings */}
+        {/* Tournament Info & Standings - Only show when a tournament is selected */}
         {selectedTournament && (
           <div className="space-y-6">
             {/* Tournament Header */}
@@ -382,7 +557,7 @@ const Standing: React.FC = () => {
                 <div className="text-center py-12">
                   <p className="text-rose-600">{error}</p>
                   <button
-                    onClick={() => fetchTournamentMatches(selectedTournamentId)}
+                    onClick={() => fetchTournamentStandings(selectedTournamentId)}
                     className="mt-4 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700"
                   >
                     Retry
@@ -448,7 +623,7 @@ const Standing: React.FC = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
                   </div>
-                  <p className="text-slate-600">No matches have been played yet</p>
+                  <p className="text-slate-600">No standings available</p>
                   <p className="text-sm text-slate-500 mt-1">
                     Standings will appear once matches are completed
                   </p>
@@ -459,7 +634,7 @@ const Standing: React.FC = () => {
             {/* Team Stats Summary */}
             {standings.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Top Scorer Card */}
+                {/* Top Team Card */}
                 <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-yellow-100 rounded-lg">
@@ -515,7 +690,7 @@ const Standing: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Most Improved Card */}
+                {/* Best Point Difference Card */}
                 <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-purple-100 rounded-lg">
@@ -537,6 +712,19 @@ const Standing: React.FC = () => {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Show message when no tournament is selected */}
+        {!selectedTournament && !loading && (
+          <div className="rounded-2xl bg-white p-12 shadow-sm ring-1 ring-slate-200 text-center">
+            <div className="mx-auto w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+              <svg className="h-10 w-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No Tournament Selected</h3>
+            <p className="text-sm text-slate-500">Please select a tournament from the dropdown above to view standings.</p>
           </div>
         )}
       </div>
