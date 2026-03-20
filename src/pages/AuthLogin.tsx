@@ -83,7 +83,7 @@ export default function AuthLogin() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8080/project/auth/login", {
+      const response = await fetch("/project/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
